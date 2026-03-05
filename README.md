@@ -13,6 +13,7 @@ This script set gives a Chord Track-style workflow in REAPER with:
 ## Files
 
 - `index.xml` (ReaPack repository index)
+- `RELEASE.md` (quick release checklist)
 - `tools/generate-reapack-index.ps1` (regenerates `index.xml` from current files)
 - `tools/publish-reapack-release.ps1` (one-command tag-based ReaPack release)
 - `Oz Chord Track - Register actions from actions folder.lua` (optional bulk action registrar)
@@ -75,6 +76,7 @@ What this does:
 CI automation:
 
 - `.github/workflows/reapack-tag-release.yml` validates that all `index.xml` source URLs are pinned to the pushed tag and ensures a GitHub release exists for that tag.
+- For a step-by-step operator checklist, use `RELEASE.md`.
 
 ## Core workflow
 
