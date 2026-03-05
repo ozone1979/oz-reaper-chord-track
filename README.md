@@ -51,6 +51,10 @@ Default feed URL (after push):
 
 - `https://raw.githubusercontent.com/ozone1979/oz-reaper-chord-track/main/index.xml`
 
+Latest release:
+
+- `v0.1.1` — `https://github.com/ozone1979/oz-reaper-chord-track/releases/tag/v0.1.1`
+
 Regenerate the index after adding/removing actions or support files:
 
 - `powershell -ExecutionPolicy Bypass -File .\tools\generate-reapack-index.ps1 -GithubOwner "ozone1979" -RepoName "oz-reaper-chord-track" -Branch "main" -Version "0.1.0" -Author "ozone1979"`
