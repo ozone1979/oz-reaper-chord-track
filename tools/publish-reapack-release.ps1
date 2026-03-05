@@ -52,14 +52,51 @@ if (-not (Test-Path $generator)) {
 
 & $generator -GithubOwner $GithubOwner -RepoName $RepoName -Branch $tag -Version $Version -Author $Author
 
+$readmePath = Join-Path $repoRoot "README.md"
+if (Test-Path $readmePath) {
+    $readme = Get-Content -Path $readmePath -Raw -Encoding UTF8
+    $releaseUrl = "https://github.com/$GithubOwner/$RepoName/releases/tag/$tag"
+    $latestReleaseLine = '- `{0}` — `{1}`' -f $tag, $releaseUrl
+
+    $updatedReadme = [regex]::Replace(
+        $readme,
+        '(?m)^- `v[^`]+` — `https://github\.com/[^`]+/releases/tag/v[^`]+`$'
+        ,
+        [System.Text.RegularExpressions.MatchEvaluator]{
+            param($m)
+            $latestReleaseLine
+        },
+        1
+    )
+
+    if ($updatedReadme -eq $readme) {
+        $eol = if ($readme -match "`r`n") { "`r`n" } else { "`n" }
+        $updatedReadme = [regex]::Replace(
+            $readme,
+            '(?m)^Latest release:\s*$'
+            ,
+            "Latest release:$eol$eol$latestReleaseLine",
+            1
+        )
+    }
+
+    if ($updatedReadme -ne $readme) {
+        Set-Content -Path $readmePath -Value $updatedReadme -Encoding UTF8
+    }
+}
+
 $indexDiff = git diff --name-only -- index.xml
 if (-not $indexDiff) {
     throw "index.xml was not changed by generator. Aborting to avoid an empty release commit."
 }
 
-git add index.xml
+if (Test-Path $readmePath) {
+    git add index.xml README.md
+} else {
+    git add index.xml
+}
 if ($LASTEXITCODE -ne 0) {
-    throw "Failed to stage index.xml"
+    throw "Failed to stage release files"
 }
 
 git commit -m "Prepare ReaPack release $tag"

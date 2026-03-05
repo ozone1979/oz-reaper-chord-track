@@ -76,6 +76,7 @@ What this does:
 3. Creates annotated git tag `v<Version>`.
 4. Pushes `main` and the tag.
 5. Creates a GitHub release for that tag.
+6. Updates README `Latest release` to the new tag.
 
 CI automation:
 
