@@ -14,6 +14,7 @@ This script set gives a Chord Track-style workflow in REAPER with:
 
 - `index.xml` (ReaPack repository index)
 - `tools/generate-reapack-index.ps1` (regenerates `index.xml` from current files)
+- `tools/publish-reapack-release.ps1` (one-command tag-based ReaPack release)
 - `Oz Chord Track - Register actions from actions folder.lua` (optional bulk action registrar)
 - `Oz Chord Track - Cleanup stale top-level actions.lua` (optional migration cleanup helper)
 - `Oz Chord Track Core.lua` (compatibility loader that forwards to `libs/Oz Chord Track Core.lua`)
@@ -56,6 +57,24 @@ Regenerate the index after adding/removing actions or support files:
 For new releases, bump `-Version` before committing so ReaPack sees an update.
 
 If the final GitHub owner/repo differs, rerun the generator with the correct `-GithubOwner` and `-RepoName` values, then commit/push the updated `index.xml`.
+
+### Tag-based releases (recommended)
+
+Use tag-pinned source URLs so each ReaPack version references immutable files.
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\publish-reapack-release.ps1 -Version "0.1.1" -GithubOwner "ozone1979" -RepoName "oz-reaper-chord-track" -Author "ozone1979"`
+
+What this does:
+
+1. Regenerates `index.xml` with source URLs pinned to `v<Version>`.
+2. Commits the updated `index.xml`.
+3. Creates annotated git tag `v<Version>`.
+4. Pushes `main` and the tag.
+5. Creates a GitHub release for that tag.
+
+CI automation:
+
+- `.github/workflows/reapack-tag-release.yml` validates that all `index.xml` source URLs are pinned to the pushed tag and ensures a GitHub release exists for that tag.
 
 ## Core workflow
 
