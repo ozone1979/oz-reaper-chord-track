@@ -47,11 +47,11 @@ This repo now includes a ReaPack index at `index.xml` and a generator script.
 
 Default feed URL (after push):
 
-- `https://raw.githubusercontent.com/RichaOt/oz-reaper-chord-track/main/index.xml`
+- `https://raw.githubusercontent.com/ozone1979/oz-reaper-chord-track/main/index.xml`
 
 Regenerate the index after adding/removing actions or support files:
 
-- `powershell -ExecutionPolicy Bypass -File .\tools\generate-reapack-index.ps1 -GithubOwner "RichaOt" -RepoName "oz-reaper-chord-track" -Branch "main" -Version "0.1.0" -Author "RichaOt"`
+- `powershell -ExecutionPolicy Bypass -File .\tools\generate-reapack-index.ps1 -GithubOwner "ozone1979" -RepoName "oz-reaper-chord-track" -Branch "main" -Version "0.1.0" -Author "ozone1979"`
 
 For new releases, bump `-Version` before committing so ReaPack sees an update.
 
