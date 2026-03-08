@@ -90,12 +90,12 @@ local INPUT_MANAGER_STOP_SCRIPT = "libs/Oz Chord Track - Stop input snap manager
 local INPUT_SNAP_JSFX_RELATIVE_PATH = "Oz Reaper Chord Track/Oz Chord Track Input Snap.jsfx"
 
 local INPUT_SNAP_JSFX_SOURCE = [[desc:Oz Chord Track Input Snap
+options:gmem=OZ_REAPER_CHORD_TRACK_INPUT_SNAP
 
 slider1:2<0,2,1{Chords,Scales,Chords+Scales}>Snap Mode
 slider2:1<0,1,1{Off,On}>Enabled
 
 @init
-gmem_attach("OZ_REAPER_CHORD_TRACK_INPUT_SNAP");
 
 GMEM_CHORD_COUNT = 1;
 GMEM_SCALE_COUNT = 2;
@@ -3023,6 +3023,14 @@ local function has_input_snap_jsfx_installed()
   return find_input_snap_jsfx_file_path() ~= nil
 end
 
+local function is_legacy_input_snap_jsfx(path)
+  local handle = io.open(path, "rb")
+  if not handle then return false end
+  local content = handle:read("*a") or ""
+  handle:close()
+  return content:find("gmem_attach", 1, true) ~= nil
+end
+
 local function install_input_snap_jsfx()
   if not reaper.GetResourcePath then
     return false, "Could not resolve REAPER resource path for JSFX install."
@@ -3060,6 +3068,9 @@ end
 local function ensure_input_snap_jsfx_installed()
   local existing = find_input_snap_jsfx_file_path()
   if existing then
+    if is_legacy_input_snap_jsfx(existing) then
+      return install_input_snap_jsfx()
+    end
     return true, nil
   end
 
