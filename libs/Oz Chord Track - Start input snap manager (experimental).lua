@@ -293,7 +293,6 @@ local function discover_jsfx_add_names_from_effects_tree()
   end
 
   if not reaper.GetResourcePath or not reaper.EnumerateFiles or not reaper.EnumerateSubdirectories then
-    cached_discovered_jsfx_add_names = discovered
     return discovered
   end
 
@@ -331,7 +330,10 @@ local function discover_jsfx_add_names_from_effects_tree()
 
   scan_dir(effects_root, nil)
 
-  cached_discovered_jsfx_add_names = discovered
+  if #discovered > #JSFX_ADD_NAME_CANDIDATES then
+    cached_discovered_jsfx_add_names = discovered
+  end
+
   return discovered
 end
 
