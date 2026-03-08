@@ -87,6 +87,114 @@ local CHORD_BLOCK_THEME_LABELS = {
 
 local INPUT_MANAGER_START_SCRIPT = "libs/Oz Chord Track - Start input snap manager (experimental).lua"
 local INPUT_MANAGER_STOP_SCRIPT = "libs/Oz Chord Track - Stop input snap manager (experimental).lua"
+local INPUT_SNAP_JSFX_RELATIVE_PATH = "Oz Reaper Chord Track/Oz Chord Track Input Snap.jsfx"
+
+local INPUT_SNAP_JSFX_SOURCE = [[desc:Oz Chord Track Input Snap
+
+slider1:2<0,2,1{Chords,Scales,Chords+Scales}>Snap Mode
+slider2:1<0,1,1{Off,On}>Enabled
+
+@init
+gmem_attach("OZ_REAPER_CHORD_TRACK_INPUT_SNAP");
+
+GMEM_CHORD_COUNT = 1;
+GMEM_SCALE_COUNT = 2;
+GMEM_RUNNING = 4;
+GMEM_CHORD_BASE = 8;
+GMEM_SCALE_BASE = 24;
+
+i = 0;
+loop(2048,
+  map_note[i] = -1;
+  i += 1;
+);
+
+function normalize_pc(value) local(result) (
+  result = value % 12;
+  result < 0 ? result += 12;
+  result;
+);
+
+function is_pc_enabled_for_mode(pc, mode) local(chord_on, scale_on) (
+  chord_on = gmem[GMEM_CHORD_BASE + pc] >= 0.5;
+  scale_on = gmem[GMEM_SCALE_BASE + pc] >= 0.5;
+
+  mode == 0 ? chord_on
+  : mode == 1 ? scale_on
+  : (chord_on || scale_on);
+);
+
+function mode_has_any_notes(mode) (
+  mode == 0 ? (gmem[GMEM_CHORD_COUNT] > 0.5)
+  : mode == 1 ? (gmem[GMEM_SCALE_COUNT] > 0.5)
+  : ((gmem[GMEM_CHORD_COUNT] > 0.5) || (gmem[GMEM_SCALE_COUNT] > 0.5));
+);
+
+function nearest_allowed_note(note, mode) local(base_oct, src_pc, step, up_pc, down_pc) (
+  base_oct = floor(note / 12) * 12;
+  src_pc = normalize_pc(note);
+
+  is_pc_enabled_for_mode(src_pc, mode) ? note : (
+    step = 1;
+    loop(12,
+      up_pc = normalize_pc(src_pc + step);
+      down_pc = normalize_pc(src_pc - step);
+
+      is_pc_enabled_for_mode(down_pc, mode) ? (
+        note = base_oct + down_pc;
+        step = 100;
+      ) : is_pc_enabled_for_mode(up_pc, mode) ? (
+        note = base_oct + up_pc;
+        step = 100;
+      );
+
+      step += 1;
+    );
+
+    note < 0 ? note = 0;
+    note > 127 ? note = 127;
+    note;
+  );
+);
+
+@slider
+mode = slider1 | 0;
+mode < 0 ? mode = 0;
+mode > 2 ? mode = 2;
+enabled = slider2 >= 0.5;
+
+@block
+running = gmem[GMEM_RUNNING] >= 0.5;
+mode = slider1 | 0;
+enabled = slider2 >= 0.5;
+
+while (
+  midirecv(offset, msg1, msg23)
+) (
+  status = msg1 & 240;
+  chan = msg1 & 15;
+  note = msg23 & 127;
+  velocity = (msg23 / 256) | 0;
+  key = chan * 128 + note;
+
+  (enabled && running && mode_has_any_notes(mode) && status == 144 && velocity > 0) ? (
+    snapped_note = nearest_allowed_note(note, mode);
+    map_note[key] = snapped_note;
+    midisend(offset, msg1, (msg23 & 65280) | snapped_note);
+  ) : ((status == 128 || (status == 144 && velocity == 0)) ? (
+    mapped = map_note[key];
+    mapped >= 0 ? (
+      send_note = mapped;
+      map_note[key] = -1;
+    ) : (
+      send_note = note;
+    );
+    midisend(offset, msg1, (msg23 & 65280) | send_note);
+  ) : (
+    midisend(offset, msg1, msg23);
+  ));
+);
+]]
 
 local function message(text)
   reaper.MB(text, "Oz Reaper Chord Track", 0)
@@ -2873,6 +2981,91 @@ local function get_input_manager_runtime_status()
   return running, status_text
 end
 
+local function find_input_snap_jsfx_file_path()
+  if not reaper.GetResourcePath or not reaper.EnumerateFiles or not reaper.EnumerateSubdirectories then
+    return nil
+  end
+
+  local effects_root = tostring(reaper.GetResourcePath() or "") .. "/Effects"
+  local found_path = nil
+
+  local function scan_dir(abs_dir)
+    if found_path then return end
+
+    local file_index = 0
+    while true do
+      local file_name = reaper.EnumerateFiles(abs_dir, file_index)
+      if not file_name then break end
+
+      local normalized_file = tostring(file_name):lower()
+      if normalized_file:find("oz chord track input snap", 1, true) then
+        found_path = abs_dir .. "/" .. tostring(file_name)
+        return
+      end
+
+      file_index = file_index + 1
+    end
+
+    local sub_index = 0
+    while not found_path do
+      local sub_name = reaper.EnumerateSubdirectories(abs_dir, sub_index)
+      if not sub_name then break end
+      scan_dir(abs_dir .. "/" .. tostring(sub_name))
+      sub_index = sub_index + 1
+    end
+  end
+
+  scan_dir(effects_root)
+  return found_path
+end
+
+local function has_input_snap_jsfx_installed()
+  return find_input_snap_jsfx_file_path() ~= nil
+end
+
+local function install_input_snap_jsfx()
+  if not reaper.GetResourcePath then
+    return false, "Could not resolve REAPER resource path for JSFX install."
+  end
+
+  local resource_path = tostring(reaper.GetResourcePath() or "")
+  if resource_path == "" then
+    return false, "Could not resolve REAPER resource path for JSFX install."
+  end
+
+  local effects_root = resource_path .. "/Effects"
+  local target_rel = INPUT_SNAP_JSFX_RELATIVE_PATH:gsub("\\", "/")
+  local target_abs = effects_root .. "/" .. target_rel
+  local target_dir = target_abs:match("^(.*)[/\\][^/\\]+$")
+
+  if target_dir and reaper.RecursiveCreateDirectory then
+    reaper.RecursiveCreateDirectory(target_dir, 0)
+  end
+
+  local handle, write_err = io.open(target_abs, "wb")
+  if not handle then
+    return false, "Could not write Input Snap JSFX: " .. tostring(write_err or target_abs)
+  end
+
+  handle:write(INPUT_SNAP_JSFX_SOURCE)
+  handle:close()
+
+  if has_input_snap_jsfx_installed() then
+    return true, "Installed Input snap JSFX at REAPER/Effects/" .. target_rel
+  end
+
+  return false, "Input snap JSFX install was attempted but REAPER could not detect it yet."
+end
+
+local function ensure_input_snap_jsfx_installed()
+  local existing = find_input_snap_jsfx_file_path()
+  if existing then
+    return true, nil
+  end
+
+  return install_input_snap_jsfx()
+end
+
 local function start_new_note_snap_internal(pipeline_mode, snap_mode)
   local selected_pipeline = nil
   if pipeline_mode == nil then
@@ -2889,6 +3082,11 @@ local function start_new_note_snap_internal(pipeline_mode, snap_mode)
   end
 
   if selected_pipeline == NEW_NOTE_SNAP_PIPELINE_PRE then
+    local ok_jsfx, jsfx_status = ensure_input_snap_jsfx_installed()
+    if not ok_jsfx then
+      return false, jsfx_status or "Input snap JSFX not found and auto-install failed."
+    end
+
     set_input_manager_snap_mode_override(selected_snap_mode)
     local ok_manager, manager_err = run_script_action_by_file_name(INPUT_MANAGER_START_SCRIPT)
     if not ok_manager then
@@ -2933,6 +3131,16 @@ end
 function OzChordTrack.stop_new_note_snap()
   local _, status = stop_new_note_snap_internal()
   message(status)
+end
+
+function OzChordTrack.ensure_input_snap_jsfx()
+  local ok, status = ensure_input_snap_jsfx_installed()
+  if ok then
+    message(status or "Input snap JSFX is installed.")
+  else
+    message(status or "Could not ensure Input snap JSFX is installed.")
+  end
+  return ok, status
 end
 
 function OzChordTrack.run_dockable_panel()

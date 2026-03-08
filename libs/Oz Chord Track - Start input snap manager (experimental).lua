@@ -29,6 +29,15 @@ local MODE_TO_JSFX_PARAM = {
   [AUTO_SNAP_ARM_MODE_CHORDS_SCALES] = 2,
 }
 
+local JSFX_ADD_NAME_CANDIDATES = {
+  FX_NAME,
+  "JS:Oz Reaper Chord Track/Oz Chord Track Input Snap",
+  "JS:Oz Chord Track Input Snap",
+  FX_NAME_FALLBACK,
+}
+
+local cached_discovered_jsfx_add_names = nil
+
 local function csv_to_set(csv)
   local set = {}
   if not csv or csv == "" then return set end
@@ -258,6 +267,74 @@ local function normalize_fx_name(name)
   return value
 end
 
+local function trim_jsfx_extension(name)
+  local value = tostring(name or "")
+  return value:gsub("%.jsfx$", "")
+end
+
+local function add_unique_string(list, seen, value)
+  local text = tostring(value or "")
+  if text == "" then return end
+  if seen[text] then return end
+  seen[text] = true
+  list[#list + 1] = text
+end
+
+local function discover_jsfx_add_names_from_effects_tree()
+  if cached_discovered_jsfx_add_names then
+    return cached_discovered_jsfx_add_names
+  end
+
+  local discovered = {}
+  local seen = {}
+
+  for i = 1, #JSFX_ADD_NAME_CANDIDATES do
+    add_unique_string(discovered, seen, JSFX_ADD_NAME_CANDIDATES[i])
+  end
+
+  if not reaper.GetResourcePath or not reaper.EnumerateFiles or not reaper.EnumerateSubdirectories then
+    cached_discovered_jsfx_add_names = discovered
+    return discovered
+  end
+
+  local effects_root = tostring(reaper.GetResourcePath() or "") .. "/Effects"
+
+  local function scan_dir(abs_dir, relative_dir)
+    local file_index = 0
+    while true do
+      local file_name = reaper.EnumerateFiles(abs_dir, file_index)
+      if not file_name then break end
+
+      local normalized_file = tostring(file_name):lower()
+      if normalized_file:find("oz chord track input snap", 1, true) then
+        local rel = relative_dir and (relative_dir .. "/" .. tostring(file_name)) or tostring(file_name)
+        rel = rel:gsub("\\", "/")
+        rel = trim_jsfx_extension(rel)
+        add_unique_string(discovered, seen, "JS:" .. rel)
+      end
+
+      file_index = file_index + 1
+    end
+
+    local sub_index = 0
+    while true do
+      local sub_name = reaper.EnumerateSubdirectories(abs_dir, sub_index)
+      if not sub_name then break end
+
+      local child_abs = abs_dir .. "/" .. tostring(sub_name)
+      local child_rel = relative_dir and (relative_dir .. "/" .. tostring(sub_name)) or tostring(sub_name)
+      scan_dir(child_abs, child_rel)
+
+      sub_index = sub_index + 1
+    end
+  end
+
+  scan_dir(effects_root, nil)
+
+  cached_discovered_jsfx_add_names = discovered
+  return discovered
+end
+
 local function is_input_snap_fx_name(name)
   local normalized = normalize_fx_name(name)
   return normalized:find("oz chord track input snap", 1, true) ~= nil
@@ -308,14 +385,12 @@ local function ensure_input_fx(track)
     return fx_index
   end
 
-  fx_index = reaper.TrackFX_AddByName(track, FX_NAME, true, 1)
-  if fx_index >= 0 then
-    return fx_index
-  end
-
-  fx_index = reaper.TrackFX_AddByName(track, FX_NAME_FALLBACK, true, 1)
-  if fx_index >= 0 then
-    return fx_index
+  local add_names = discover_jsfx_add_names_from_effects_tree()
+  for i = 1, #add_names do
+    fx_index = reaper.TrackFX_AddByName(track, add_names[i], true, 1)
+    if fx_index >= 0 then
+      return fx_index
+    end
   end
 
   return find_input_fx(track)
