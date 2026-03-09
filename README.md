@@ -26,7 +26,7 @@ This script set gives a Chord Track-style workflow in REAPER with:
 - `libs/Oz Chord Track - Stop input snap manager (experimental).lua` (internal)
 - `libs/Oz Chord Track Core.lua` (internal implementation)
 - `libs/Oz Chord Track Loader.lua` (shared helper/loader for wrappers and internal script resolution)
-- `Effects/ReaTrak/Oz Chord Track Input Snap` (JSFX companion for manager)
+- `Effects/Oz Chord Track/Oz Chord Track Input Snap` (JSFX companion for manager)
 
 Hierarchy note:
 
@@ -263,7 +263,7 @@ How it works:
 - **UnArm All** clears auto-snap arming from all target tracks (chord track excluded)
 - If JSFX files are updated, run **Repair input snap FX instances** once to reload clean instances before testing live Follow-mode display updates
 - If started directly by action (outside unified UI), it falls back to each armed track’s Follow mode from Auto-snap Arm assignment
-- Auto-inserts/enables **JS: ReaTrak/Oz Chord Track Input Snap** on armed target tracks
+- Auto-inserts/enables **JS: Oz Chord Track/Oz Chord Track Input Snap** on armed target tracks
 - Disables that JSFX on tracks that are not currently active targets
 - Remaps incoming note-on/note-off in the input FX stage (before recording)
 

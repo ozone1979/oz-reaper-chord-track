@@ -87,7 +87,7 @@ local CHORD_BLOCK_THEME_LABELS = {
 
 local INPUT_MANAGER_START_SCRIPT = "libs/Oz Chord Track - Start input snap manager (experimental).lua"
 local INPUT_MANAGER_STOP_SCRIPT = "libs/Oz Chord Track - Stop input snap manager (experimental).lua"
-local INPUT_SNAP_JSFX_RELATIVE_PATH = "Oz Reaper Chord Track/Oz Chord Track Input Snap.jsfx"
+local INPUT_SNAP_JSFX_RELATIVE_PATH = "Oz Chord Track/Oz Chord Track Input Snap.jsfx"
 
 local INPUT_SNAP_JSFX_SOURCE = [[desc:Oz Chord Track Input Snap
 options:gmem=OZ_REAPER_CHORD_TRACK_INPUT_SNAP

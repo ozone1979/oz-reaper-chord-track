@@ -4,7 +4,7 @@ local RUN_TOKEN_KEY = "RUN_TOKEN"
 local STATUS_KEY = "STATUS"
 local SNAP_MODE_OVERRIDE_KEY = "SNAP_MODE_OVERRIDE"
 
-local FX_NAME = "JS:ReaTrak/Oz Chord Track Input Snap"
+local FX_NAME = "JS:Oz Chord Track/Oz Chord Track Input Snap"
 local FX_NAME_FALLBACK = "JS: Oz Chord Track Input Snap"
 local GMEM_NAMESPACE = "OZ_REAPER_CHORD_TRACK_INPUT_SNAP"
 local REC_FX_OFFSET = 0x1000000
