@@ -3326,6 +3326,36 @@ function OzChordTrack.run_dockable_panel()
     end
   end
 
+  local function run_ensure_input_snap_jsfx_action()
+    local ok, status = ensure_input_snap_jsfx_installed()
+    if ok then
+      set_status(status or "Input snap JSFX is installed.")
+    else
+      set_status(status or "Could not ensure Input snap JSFX is installed.")
+    end
+  end
+
+  local function run_repair_input_snap_fx_action()
+    local previous_override = reaper.GetExtState(INPUT_MANAGER_SECTION, INPUT_MANAGER_SNAP_MODE_OVERRIDE_KEY)
+
+    local ok_stop, stop_err = run_script_action_by_file_name(INPUT_MANAGER_STOP_SCRIPT)
+    if not ok_stop then
+      set_status(stop_err or "Could not stop input snap manager for repair.")
+      return
+    end
+
+    if previous_override and previous_override ~= "" then
+      reaper.SetExtState(INPUT_MANAGER_SECTION, INPUT_MANAGER_SNAP_MODE_OVERRIDE_KEY, previous_override, false)
+    end
+
+    local ok_start, start_err = run_script_action_by_file_name(INPUT_MANAGER_START_SCRIPT)
+    if ok_start then
+      set_status("Repaired input snap FX instances.")
+    else
+      set_status(start_err or "Could not restart input snap manager after repair.")
+    end
+  end
+
   local function sync_new_note_snap_runtime_for_armed_targets()
     local armed_target_count = count_follow_armed_target_tracks()
     if armed_target_count <= 0 then
@@ -4565,6 +4595,11 @@ function OzChordTrack.run_dockable_panel()
         label(runtime_detail, density.meta_font, runtime_r, runtime_g, runtime_b)
         label("Current method: " .. snap_mode_to_label(effective_snap_mode), density.meta_font, 0.80, 0.80, 0.84)
 
+        spacer(density.spacer_h)
+        label("Input Snap Utilities", density.heading_font, 0.95, 0.95, 0.98)
+        button_row("Ensure input snap JSFX installed", run_ensure_input_snap_jsfx_action)
+        button_row("Repair input snap FX instances", run_repair_input_snap_fx_action)
+
       elseif target_tab == "theme" then
         local resolved = resolve_chord_block_theme(ui_state.block_theme)
 
@@ -5041,6 +5076,36 @@ function OzChordTrack.run_compact_popout_panel()
     end
   end
 
+  local function run_ensure_input_snap_jsfx_action()
+    local ok, status = ensure_input_snap_jsfx_installed()
+    if ok then
+      set_status(status or "Input snap JSFX is installed.")
+    else
+      set_status(status or "Could not ensure Input snap JSFX is installed.")
+    end
+  end
+
+  local function run_repair_input_snap_fx_action()
+    local previous_override = reaper.GetExtState(INPUT_MANAGER_SECTION, INPUT_MANAGER_SNAP_MODE_OVERRIDE_KEY)
+
+    local ok_stop, stop_err = run_script_action_by_file_name(INPUT_MANAGER_STOP_SCRIPT)
+    if not ok_stop then
+      set_status(stop_err or "Could not stop input snap manager for repair.")
+      return
+    end
+
+    if previous_override and previous_override ~= "" then
+      reaper.SetExtState(INPUT_MANAGER_SECTION, INPUT_MANAGER_SNAP_MODE_OVERRIDE_KEY, previous_override, false)
+    end
+
+    local ok_start, start_err = run_script_action_by_file_name(INPUT_MANAGER_START_SCRIPT)
+    if ok_start then
+      set_status("Repaired input snap FX instances.")
+    else
+      set_status(start_err or "Could not restart input snap manager after repair.")
+    end
+  end
+
   local function sync_new_note_snap_runtime_for_armed_targets()
     local armed_target_count = count_follow_armed_target_tracks()
     if armed_target_count <= 0 then
@@ -5484,6 +5549,11 @@ function OzChordTrack.run_compact_popout_panel()
         end
         label(runtime_detail, meta_font, runtime_r, runtime_g, runtime_b)
         label("Current method: " .. snap_mode_to_label(effective_snap_mode), meta_font, 0.80, 0.80, 0.84)
+
+        spacer(spacer_h)
+        label("Input Snap Utilities", heading_font, 0.95, 0.95, 0.98)
+        button_row("Ensure input snap JSFX installed", run_ensure_input_snap_jsfx_action)
+        button_row("Repair input snap FX instances", run_repair_input_snap_fx_action)
 
       elseif ui_state.active_tab == "theme" then
         local resolved = resolve_chord_block_theme(ui_state.block_theme)
