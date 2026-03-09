@@ -16,6 +16,7 @@ This script set gives a Chord Track-style workflow in REAPER with:
 - `RELEASE.md` (quick release checklist)
 - `tools/generate-reapack-index.ps1` (regenerates `index.xml` from current files)
 - `tools/publish-reapack-release.ps1` (one-command tag-based ReaPack release)
+- `tools/sync-reaper-scripts.ps1` (one-command sync to local REAPER `Scripts/.../Oz Reaper Chord Track/Scripts` test mirror)
 - `Oz Chord Track - Register actions from actions folder.lua` (optional bulk action registrar)
 - `Oz Chord Track - Cleanup stale top-level actions.lua` (optional migration cleanup helper)
 - `Oz Chord Track Core.lua` (compatibility loader that forwards to `libs/Oz Chord Track Core.lua`)
@@ -42,6 +43,17 @@ Hierarchy note:
 	- Do not import scripts from `libs/`.
 2. Optionally bind shortcuts or toolbar buttons.
 3. Open any MIDI item in the MIDI editor, enable **Key snap**, choose root+scale.
+
+## Local ReaPack sync/testing mirror
+
+If you keep a local REAPER test mirror at `%APPDATA%\REAPER\Scripts\Oz Reaper Chord Track\Scripts`, run:
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\sync-reaper-scripts.ps1 -Verify`
+
+Optional overrides:
+
+- `-DestinationRoot "C:\path\to\REAPER\Scripts\Oz Reaper Chord Track\Scripts"`
+- `-SourceRoot "C:\path\to\repo\Oz Reaper Chord Track"`
 
 ## ReaPack feed (GitHub)
 
