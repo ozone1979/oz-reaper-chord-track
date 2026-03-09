@@ -1,4 +1,4 @@
-# Oz Reaper Chord Track
+﻿# Oz Reaper Chord Track
 
 This script set gives a Chord Track-style workflow in REAPER with:
 
@@ -65,6 +65,7 @@ Default feed URL (after push):
 
 Latest release:
 
+- `v0.1.3` â€” `https://github.com/ozone1979/oz-reaper-chord-track/releases/tag/v0.1.3`
 - `v0.1.2` — `https://github.com/ozone1979/oz-reaper-chord-track/releases/tag/v0.1.2`
 
 Regenerate the index after adding/removing actions or support files:
@@ -280,3 +281,4 @@ Notes:
 - Chord+Scale mode prefers intersection; if empty, it falls back to chord tones
 - Live behavior is best-effort and applies to newly detected notes on live target tracks (record-armed, or input-monitored in fixed live modes)
 - Status/message wording is now normalized across Action List dialogs, the docked panel, and the compact popout window
+
