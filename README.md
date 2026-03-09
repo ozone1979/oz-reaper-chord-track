@@ -65,7 +65,7 @@ Default feed URL (after push):
 
 Latest release:
 
-- `v0.1.1` — `https://github.com/ozone1979/oz-reaper-chord-track/releases/tag/v0.1.1`
+- `v0.1.2` — `https://github.com/ozone1979/oz-reaper-chord-track/releases/tag/v0.1.2`
 
 Regenerate the index after adding/removing actions or support files:
 
