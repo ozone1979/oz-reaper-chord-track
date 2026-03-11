@@ -11,6 +11,7 @@ local GMEM_CHORD_COUNT = 1
 local GMEM_SCALE_COUNT = 2
 local GMEM_HEARTBEAT = 3
 local GMEM_RUNNING = 4
+local GMEM_ALLOW_INVERSIONS = 5
 local GMEM_CHORD_BASE = 8
 local GMEM_SCALE_BASE = 24
 
@@ -81,6 +82,7 @@ local function clear_shared_memory()
   local version = math.floor(as_number(reaper.gmem_read(GMEM_VERSION)) or 0) + 1
   reaper.gmem_write(GMEM_CHORD_COUNT, 0)
   reaper.gmem_write(GMEM_SCALE_COUNT, 0)
+  reaper.gmem_write(GMEM_ALLOW_INVERSIONS, 0)
   for pc = 0, 11 do
     reaper.gmem_write(GMEM_CHORD_BASE + pc, 0)
     reaper.gmem_write(GMEM_SCALE_BASE + pc, 0)

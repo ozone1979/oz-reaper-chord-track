@@ -3,6 +3,7 @@ local MANAGER_SECTION = "OZ_REAPER_CHORD_TRACK_INPUT_MANAGER"
 local RUN_TOKEN_KEY = "RUN_TOKEN"
 local STATUS_KEY = "STATUS"
 local SNAP_MODE_OVERRIDE_KEY = "SNAP_MODE_OVERRIDE"
+local ALLOW_SNAP_INVERSIONS_KEY = "ALLOW_SNAP_INVERSIONS"
 
 local FX_NAME = "JS:Oz Chord Track/Oz Chord Track Input Snap"
 local FX_NAME_FALLBACK = "JS: Oz Chord Track Input Snap"
@@ -14,6 +15,7 @@ local GMEM_CHORD_COUNT = 1
 local GMEM_SCALE_COUNT = 2
 local GMEM_HEARTBEAT = 3
 local GMEM_RUNNING = 4
+local GMEM_ALLOW_INVERSIONS = 5
 local GMEM_CHORD_BASE = 8
 local GMEM_SCALE_BASE = 24
 
@@ -109,6 +111,7 @@ local function normalize_auto_snap_arm_mode(mode)
   if mode == "chord_only" then return AUTO_SNAP_ARM_MODE_CHORDS end
   if mode == "scale_only" then return AUTO_SNAP_ARM_MODE_SCALES end
   if mode == "chord_scale" then return AUTO_SNAP_ARM_MODE_CHORDS_SCALES end
+  if mode == "melodic_flow" then return AUTO_SNAP_ARM_MODE_CHORDS_SCALES end
 
   if mode == AUTO_SNAP_ARM_MODE_CHORDS or mode == AUTO_SNAP_ARM_MODE_SCALES or mode == AUTO_SNAP_ARM_MODE_CHORDS_SCALES then
     return mode
@@ -124,6 +127,7 @@ local function normalize_override_mode(mode)
   if value == "chord_only" then return AUTO_SNAP_ARM_MODE_CHORDS end
   if value == "scale_only" then return AUTO_SNAP_ARM_MODE_SCALES end
   if value == "chord_scale" then return AUTO_SNAP_ARM_MODE_CHORDS_SCALES end
+  if value == "melodic_flow" then return AUTO_SNAP_ARM_MODE_CHORDS_SCALES end
 
   value = normalize_auto_snap_arm_mode(value)
   if value == AUTO_SNAP_ARM_MODE_OFF then
@@ -219,6 +223,11 @@ local function write_shared_sets(runtime_state, chord_set, scale_set)
     runtime_state.last_shared_signature = signature
   end
 
+  local _, allow_inversions_value = reaper.GetProjExtState(0, EXT_SECTION, ALLOW_SNAP_INVERSIONS_KEY)
+  local allow_inversions = tostring(allow_inversions_value or ""):lower()
+  local allow_flag = (allow_inversions == "1" or allow_inversions == "true" or allow_inversions == "yes" or allow_inversions == "on") and 1 or 0
+  reaper.gmem_write(GMEM_ALLOW_INVERSIONS, allow_flag)
+
   reaper.gmem_write(GMEM_RUNNING, 1)
   reaper.gmem_write(GMEM_HEARTBEAT, reaper.time_precise())
 
@@ -231,6 +240,7 @@ local function clear_shared_sets(runtime_state)
 
   reaper.gmem_write(GMEM_CHORD_COUNT, 0)
   reaper.gmem_write(GMEM_SCALE_COUNT, 0)
+  reaper.gmem_write(GMEM_ALLOW_INVERSIONS, 0)
   for pc = 0, 11 do
     reaper.gmem_write(GMEM_CHORD_BASE + pc, 0)
     reaper.gmem_write(GMEM_SCALE_BASE + pc, 0)

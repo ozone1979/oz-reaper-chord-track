@@ -9,6 +9,7 @@ local INPUT_MANAGER_STATUS_KEY = "STATUS"
 local INPUT_MANAGER_SNAP_MODE_OVERRIDE_KEY = "SNAP_MODE_OVERRIDE"
 local PANEL_SECTION = "OZ_REAPER_CHORD_TRACK_PANEL"
 local CUT_OVERLAPS_AFTER_SNAP_KEY = "CUT_OVERLAPS_AFTER_SNAP"
+local ALLOW_SNAP_INVERSIONS_KEY = "ALLOW_SNAP_INVERSIONS"
 local POPOUT_INITIAL_TAB_KEY = "POPOUT_INITIAL_TAB"
 local POPOUT_WINDOW_X_KEY = "POPOUT_WINDOW_X"
 local POPOUT_WINDOW_Y_KEY = "POPOUT_WINDOW_Y"
@@ -53,6 +54,7 @@ local AUTO_SNAP_ARM_MODE_TO_SNAP_MODE = {
 local SNAP_MODE_CHORD_ONLY = "chord_only"
 local SNAP_MODE_SCALE_ONLY = "scale_only"
 local SNAP_MODE_CHORD_SCALE = "chord_scale"
+local SNAP_MODE_MELODIC_FLOW = "melodic_flow"
 local SNAP_MODE_DEFAULT = SNAP_MODE_CHORD_SCALE
 
 local NEW_NOTE_SNAP_PIPELINE_PRE = "pre"
@@ -63,6 +65,7 @@ local SNAP_MODE_LABELS = {
   [SNAP_MODE_CHORD_ONLY] = "Chords",
   [SNAP_MODE_SCALE_ONLY] = "Scales",
   [SNAP_MODE_CHORD_SCALE] = "Chords + Scales",
+  [SNAP_MODE_MELODIC_FLOW] = "Melodic Flow",
 }
 
 local CHORD_BLOCK_THEME_AUTO = "auto"
@@ -100,6 +103,7 @@ slider2:1<0,1,1{Off,On}>Enabled
 GMEM_CHORD_COUNT = 1;
 GMEM_SCALE_COUNT = 2;
 GMEM_RUNNING = 4;
+GMEM_ALLOW_INVERSIONS = 5;
 GMEM_CHORD_BASE = 8;
 GMEM_SCALE_BASE = 24;
 
@@ -219,8 +223,13 @@ while (
   key = chan * 128 + note;
 
   (enabled && running && mode_has_any_notes(mode) && status == 144 && velocity > 0) ? (
-    neighboring_snapped_bounds(chan, note);
-    snapped_note = nearest_allowed_note(note, mode, min_bound + 1, max_bound - 1);
+    allow_inversions = gmem[GMEM_ALLOW_INVERSIONS] >= 0.5;
+    allow_inversions ? (
+      snapped_note = nearest_allowed_note_unbounded(note, mode);
+    ) : (
+      neighboring_snapped_bounds(chan, note);
+      snapped_note = nearest_allowed_note(note, mode, min_bound + 1, max_bound - 1);
+    );
     map_note[key] = snapped_note;
     midisend(offset, msg1, (msg23 & 65280) | snapped_note);
   ) : ((status == 128 || (status == 144 && velocity == 0)) ? (
@@ -481,6 +490,7 @@ local function normalize_auto_snap_arm_mode(mode)
   if mode == SNAP_MODE_CHORD_ONLY then return AUTO_SNAP_ARM_MODE_CHORDS end
   if mode == SNAP_MODE_SCALE_ONLY then return AUTO_SNAP_ARM_MODE_SCALES end
   if mode == SNAP_MODE_CHORD_SCALE then return AUTO_SNAP_ARM_MODE_CHORDS_SCALES end
+  if mode == SNAP_MODE_MELODIC_FLOW then return AUTO_SNAP_ARM_MODE_CHORDS_SCALES end
 
   if AUTO_SNAP_ARM_MODE_LABELS[mode] then
     return mode
@@ -493,6 +503,7 @@ local function normalize_snap_mode(mode)
   if mode == AUTO_SNAP_ARM_MODE_CHORDS or mode == "chords" then return SNAP_MODE_CHORD_ONLY end
   if mode == AUTO_SNAP_ARM_MODE_SCALES or mode == "scales" then return SNAP_MODE_SCALE_ONLY end
   if mode == AUTO_SNAP_ARM_MODE_CHORDS_SCALES or mode == "chords_scales" then return SNAP_MODE_CHORD_SCALE end
+  if mode == "melodicflow" or mode == "melodic flow" then return SNAP_MODE_MELODIC_FLOW end
 
   if SNAP_MODE_LABELS[mode] then
     return mode
@@ -568,7 +579,13 @@ local function snap_mode_to_auto_snap_arm_mode(mode)
   if normalized == SNAP_MODE_CHORD_ONLY then return AUTO_SNAP_ARM_MODE_CHORDS end
   if normalized == SNAP_MODE_SCALE_ONLY then return AUTO_SNAP_ARM_MODE_SCALES end
   if normalized == SNAP_MODE_CHORD_SCALE then return AUTO_SNAP_ARM_MODE_CHORDS_SCALES end
+  if normalized == SNAP_MODE_MELODIC_FLOW then return AUTO_SNAP_ARM_MODE_CHORDS_SCALES end
   return nil
+end
+
+local function snap_mode_requires_scale(mode)
+  local normalized = normalize_snap_mode(mode)
+  return normalized == SNAP_MODE_SCALE_ONLY or normalized == SNAP_MODE_CHORD_SCALE
 end
 
 local get_auto_snap_arm_mode_for_track
@@ -714,6 +731,19 @@ end
 
 local function set_cut_overlaps_after_snap_enabled(enabled)
   reaper.SetProjExtState(0, EXT_SECTION, CUT_OVERLAPS_AFTER_SNAP_KEY, enabled and "1" or "0")
+end
+
+local function get_allow_snap_inversions_enabled()
+  local _, stored = reaper.GetProjExtState(0, EXT_SECTION, ALLOW_SNAP_INVERSIONS_KEY)
+  if not stored or stored == "" then
+    return false
+  end
+  stored = tostring(stored):lower()
+  return stored == "1" or stored == "true" or stored == "yes" or stored == "on"
+end
+
+local function set_allow_snap_inversions_enabled(enabled)
+  reaper.SetProjExtState(0, EXT_SECTION, ALLOW_SNAP_INVERSIONS_KEY, enabled and "1" or "0")
 end
 
 local function round_half_away_from_zero(value)
@@ -1603,6 +1633,131 @@ local function nearest_pitch(original_pitch, allowed_pcs)
   return original_pitch
 end
 
+local function nearest_pitch_at_or_above(original_pitch, allowed_pcs, min_pitch)
+  local floor_pitch = math.max(0, math.floor(tonumber(min_pitch) or 0))
+  local best = nil
+  local best_distance = math.huge
+
+  for candidate = floor_pitch, 127 do
+    if allowed_pcs[candidate % 12] then
+      local distance = math.abs(candidate - original_pitch)
+      if distance < best_distance or (distance == best_distance and (best == nil or candidate < best)) then
+        best = candidate
+        best_distance = distance
+      end
+    end
+  end
+
+  return best
+end
+
+local WHITE_KEY_INDEX_BY_PC = {
+  [0] = 1,
+  [2] = 2,
+  [4] = 3,
+  [5] = 4,
+  [7] = 5,
+  [9] = 6,
+  [11] = 7,
+}
+
+local function rotate_pitch_classes_from_root(pitch_set, root_pc)
+  local ordered = {}
+  for offset = 0, 11 do
+    local pc = (root_pc + offset) % 12
+    if pitch_set[pc] then
+      ordered[#ordered + 1] = offset
+    end
+  end
+  return ordered
+end
+
+local function build_melodic_flow_degree_offsets(chord_set, scale_set)
+  local root_pc = nil
+  for pc = 0, 11 do
+    if chord_set[pc] then
+      root_pc = pc
+      break
+    end
+  end
+  if root_pc == nil then
+    return nil, nil
+  end
+
+  local source_set = set_count(scale_set) > 0 and scale_set or chord_set
+  local ordered_intervals = rotate_pitch_classes_from_root(source_set, root_pc)
+  if #ordered_intervals == 0 then
+    return nil, nil
+  end
+
+  local degree_offsets = {}
+  for i = 1, 7 do
+    local third_index = (i - 1) * 2
+    local wrapped_index = (third_index % #ordered_intervals) + 1
+    local octave_offset = math.floor(third_index / #ordered_intervals) * 12
+    degree_offsets[i] = ordered_intervals[wrapped_index] + octave_offset
+  end
+
+  return root_pc, degree_offsets
+end
+
+local function clamp_midi_pitch(pitch)
+  if pitch < 0 then return 0 end
+  if pitch > 127 then return 127 end
+  return pitch
+end
+
+local function choose_black_key_passing_tone(original_pitch, lower_target, upper_target)
+  if upper_target <= lower_target then
+    upper_target = lower_target + 1
+  end
+
+  local low_candidate = lower_target + 1
+  local high_candidate = upper_target - 1
+  if high_candidate < low_candidate then
+    high_candidate = low_candidate
+  end
+
+  if math.abs(original_pitch - high_candidate) < math.abs(original_pitch - low_candidate) then
+    return high_candidate
+  end
+  return low_candidate
+end
+
+local function melodic_flow_pitch(original_pitch, chord_set, scale_set)
+  local root_pc, degree_offsets = build_melodic_flow_degree_offsets(chord_set, scale_set)
+  if not root_pc or not degree_offsets then
+    return nil
+  end
+
+  local base_oct = math.floor(original_pitch / 12) * 12
+  local white_targets = {}
+  for i = 1, 7 do
+    white_targets[i] = base_oct + root_pc + degree_offsets[i]
+  end
+
+  local pc = original_pitch % 12
+  local white_index = WHITE_KEY_INDEX_BY_PC[pc]
+  if white_index then
+    return clamp_midi_pitch(white_targets[white_index])
+  end
+
+  local black_neighbors = {
+    [1] = { 1, 2 },
+    [3] = { 2, 3 },
+    [6] = { 4, 5 },
+    [8] = { 5, 6 },
+    [10] = { 6, 7 },
+  }
+  local pair = black_neighbors[pc]
+  if not pair then
+    return nil
+  end
+
+  local passing = choose_black_key_passing_tone(original_pitch, white_targets[pair[1]], white_targets[pair[2]])
+  return clamp_midi_pitch(passing)
+end
+
 local function build_allowed_set(mode, chord_set, chord_count, scale_set)
   local scale_count = set_count(scale_set)
 
@@ -1720,15 +1875,43 @@ local function snap_take_notes(take, chord_notes, scale_set, mode, start_note_in
 
   local changed = 0
   local processed = 0
+  local allow_inversions = get_allow_snap_inversions_enabled()
+  local current_group_start_ppq = nil
+  local current_group_channel = nil
+  local last_group_snapped_pitch = nil
 
   for note_index = from_index, note_count - 1 do
     local ok, selected, muted, start_ppq, end_ppq, channel, pitch, velocity = reaper.MIDI_GetNote(take, note_index)
     if ok and not muted and (not selected_only or selected) then
+      if (not allow_inversions) and (current_group_start_ppq ~= start_ppq or current_group_channel ~= channel) then
+        current_group_start_ppq = start_ppq
+        current_group_channel = channel
+        last_group_snapped_pitch = nil
+      end
+
       local note_time = reaper.MIDI_GetProjTimeFromPPQPos(take, start_ppq)
       local chord_set, chord_count = chord_pcs_at_time(chord_notes, note_time)
       local allowed_set = build_allowed_set(mode, chord_set, chord_count, scale_set)
       if set_count(allowed_set) > 0 then
-        local snapped_pitch = nearest_pitch(pitch, allowed_set)
+        local snapped_pitch = nil
+        if normalize_snap_mode(mode) == SNAP_MODE_MELODIC_FLOW then
+          snapped_pitch = melodic_flow_pitch(pitch, chord_set, scale_set)
+        end
+        if snapped_pitch == nil then
+          snapped_pitch = nearest_pitch(pitch, allowed_set)
+        end
+
+        if (not allow_inversions) and last_group_snapped_pitch ~= nil and snapped_pitch < last_group_snapped_pitch then
+          local non_inverted = nearest_pitch_at_or_above(pitch, allowed_set, last_group_snapped_pitch)
+          if non_inverted ~= nil then
+            snapped_pitch = non_inverted
+          end
+        end
+
+        if (not allow_inversions) then
+          last_group_snapped_pitch = snapped_pitch
+        end
+
         processed = processed + 1
         if snapped_pitch ~= pitch then
           reaper.MIDI_SetNote(take, note_index, selected, muted, start_ppq, end_ppq, channel, snapped_pitch, velocity, true)
@@ -1877,7 +2060,7 @@ local function snap_selected_midi_internal(mode)
     return false, err
   end
 
-  if snap_mode ~= SNAP_MODE_CHORD_ONLY and set_count(state.scale_pcs) == 0 then
+  if snap_mode_requires_scale(snap_mode) and set_count(state.scale_pcs) == 0 then
     return false, "No scale is stored yet. Run the sync scale action from the MIDI editor first."
   end
 
@@ -1985,6 +2168,13 @@ local function format_cut_overlaps_status(enabled)
   return "Cut overlaps after snap disabled."
 end
 
+local function format_allow_snap_inversions_status(enabled)
+  if enabled then
+    return "Allow snap inversions enabled."
+  end
+  return "Allow snap inversions disabled."
+end
+
 local function format_theme_set_status(theme)
   return "Chord block theme set to " .. chord_block_theme_to_display_label(theme) .. "."
 end
@@ -2037,7 +2227,7 @@ end
 
 local function targets_need_scale(targets)
   for i = 1, #targets do
-    if targets[i].snap_mode ~= SNAP_MODE_CHORD_ONLY then
+    if snap_mode_requires_scale(targets[i].snap_mode) then
       return true
     end
   end
@@ -2628,7 +2818,7 @@ local function armed_tracks_need_scale(chord_track, mode)
     if track ~= chord_track and is_live_target_track(track, mode) then
       local auto_snap_arm_mode = get_auto_snap_arm_mode_for_track(track)
       local snap_mode = auto_snap_arm_mode_to_snap_mode(auto_snap_arm_mode)
-      if snap_mode and snap_mode ~= SNAP_MODE_CHORD_ONLY then
+      if snap_mode and snap_mode_requires_scale(snap_mode) then
         return true
       end
     end
@@ -2860,7 +3050,7 @@ local function start_live_snap_internal(mode)
     end
   else
     local normalized_mode = normalize_snap_mode(live_mode)
-    if normalized_mode ~= SNAP_MODE_CHORD_ONLY and set_count(state.scale_pcs) == 0 then
+    if snap_mode_requires_scale(normalized_mode) and set_count(state.scale_pcs) == 0 then
       return false, "No scale is stored yet. Run the sync scale action from the MIDI editor first."
     end
     live_mode = normalized_mode
@@ -3202,6 +3392,7 @@ function OzChordTrack.run_dockable_panel()
   local stored_block_theme = normalize_chord_block_theme(reaper.GetExtState(PANEL_SECTION, "BLOCK_THEME"))
   local stored_compact_mode = reaper.GetExtState(PANEL_SECTION, "COMPACT_MODE") == "1"
   local stored_cut_overlaps = get_cut_overlaps_after_snap_enabled()
+  local stored_allow_inversions = get_allow_snap_inversions_enabled()
   local stored_timeline_calibration = get_timeline_calibration_px()
 
   gfx.init("Chord Track", 680, 980, dock_state, 150, 120)
@@ -3218,6 +3409,7 @@ function OzChordTrack.run_dockable_panel()
     block_theme = stored_block_theme,
     compact_mode = stored_compact_mode,
     cut_overlaps_after_snap = stored_cut_overlaps,
+    allow_snap_inversions = stored_allow_inversions,
     timeline_calibration_px = stored_timeline_calibration,
     new_note_snap_pipeline_mode = get_new_note_snap_pipeline_mode(),
     new_note_snap_mode = get_new_note_snap_mode(),
@@ -3275,7 +3467,7 @@ function OzChordTrack.run_dockable_panel()
   local function apply_snap_selected_midi_menu(x, y)
     gfx.x = x
     gfx.y = y
-    local menu_result = gfx.showmenu("Chords + Scales|Chords Only|Scales Only")
+    local menu_result = gfx.showmenu("Chords + Scales|Chords Only|Scales Only|Melodic Flow")
     if menu_result <= 0 then
       return
     end
@@ -3285,6 +3477,8 @@ function OzChordTrack.run_dockable_panel()
       mode = SNAP_MODE_CHORD_ONLY
     elseif menu_result == 3 then
       mode = SNAP_MODE_SCALE_ONLY
+    elseif menu_result == 4 then
+      mode = SNAP_MODE_MELODIC_FLOW
     end
 
     local ok, result = snap_selected_midi_internal(mode)
@@ -3299,7 +3493,7 @@ function OzChordTrack.run_dockable_panel()
   local function apply_one_click_menu(x, y)
     gfx.x = x
     gfx.y = y
-    local menu_result = gfx.showmenu("Chords + Scales|Chords Only|Scales Only")
+    local menu_result = gfx.showmenu("Chords + Scales|Chords Only|Scales Only|Melodic Flow")
     if menu_result <= 0 then
       return
     end
@@ -3309,6 +3503,8 @@ function OzChordTrack.run_dockable_panel()
       mode = SNAP_MODE_CHORD_ONLY
     elseif menu_result == 3 then
       mode = SNAP_MODE_SCALE_ONLY
+    elseif menu_result == 4 then
+      mode = SNAP_MODE_MELODIC_FLOW
     end
 
     local ok, result = one_click_setup_sync_snap_internal(mode)
@@ -4086,6 +4282,7 @@ function OzChordTrack.run_dockable_panel()
 
     local current_state = load_state()
     ui_state.cut_overlaps_after_snap = get_cut_overlaps_after_snap_enabled()
+    ui_state.allow_snap_inversions = get_allow_snap_inversions_enabled()
     ui_state.timeline_calibration_px = get_timeline_calibration_px()
     ui_state.new_note_snap_pipeline_mode = get_new_note_snap_pipeline_mode()
     ui_state.new_note_snap_mode = get_new_note_snap_mode()
@@ -4204,7 +4401,7 @@ function OzChordTrack.run_dockable_panel()
     end
 
     local function apply_selected_mode(mode)
-      local mapped_snap_mode = auto_snap_arm_mode_to_snap_mode(mode)
+      local mapped_snap_mode = auto_snap_arm_mode_to_snap_mode(mode) or normalize_snap_mode(mode)
       if not mapped_snap_mode then
         set_status("Invalid snap method.")
         return
@@ -4573,6 +4770,9 @@ function OzChordTrack.run_dockable_panel()
         local pipeline_mode = normalize_new_note_snap_pipeline_mode(ui_state.new_note_snap_pipeline_mode)
         local selected_snap_mode = normalize_snap_mode(ui_state.new_note_snap_mode)
         local selected_mode_snap = selected_mode and auto_snap_arm_mode_to_snap_mode(selected_mode) or nil
+        if selected_snap_mode == SNAP_MODE_MELODIC_FLOW and selected_mode_snap == SNAP_MODE_CHORD_SCALE then
+          selected_mode_snap = SNAP_MODE_MELODIC_FLOW
+        end
         local effective_snap_mode = normalize_snap_mode(selected_mode_snap or selected_snap_mode)
 
         local runtime_running = false
@@ -4622,11 +4822,12 @@ function OzChordTrack.run_dockable_panel()
           { id = AUTO_SNAP_ARM_MODE_CHORDS, label = "Chords" },
           { id = AUTO_SNAP_ARM_MODE_SCALES, label = "Scales" },
           { id = AUTO_SNAP_ARM_MODE_CHORDS_SCALES, label = "Chords + Scales" },
+          { id = SNAP_MODE_MELODIC_FLOW, label = "Melodic Flow" },
         }
 
         for i = 1, #modes do
           local mode = modes[i]
-          local mode_snap = auto_snap_arm_mode_to_snap_mode(mode.id)
+          local mode_snap = auto_snap_arm_mode_to_snap_mode(mode.id) or normalize_snap_mode(mode.id)
           local marker = (mode_snap == effective_snap_mode) and "(●) " or "(○) "
           button_row(marker .. mode.label, function() apply_selected_mode(mode.id) end)
         end
@@ -4636,6 +4837,15 @@ function OzChordTrack.run_dockable_panel()
         label(runtime_label, density.body_font, runtime_r, runtime_g, runtime_b)
         label(runtime_detail, density.meta_font, runtime_r, runtime_g, runtime_b)
         label("Current method: " .. snap_mode_to_label(effective_snap_mode), density.meta_font, 0.80, 0.80, 0.84)
+
+        spacer(density.spacer_h)
+        label("Voicing", density.heading_font, 0.95, 0.95, 0.98)
+        button_row((ui_state.allow_snap_inversions and "[x] " or "[ ] ") .. "Allow snap inversions", function()
+          local next_value = not ui_state.allow_snap_inversions
+          set_allow_snap_inversions_enabled(next_value)
+          ui_state.allow_snap_inversions = next_value
+          set_status(format_allow_snap_inversions_status(next_value))
+        end)
 
         spacer(density.spacer_h)
         label("Input Snap Utilities", density.heading_font, 0.95, 0.95, 0.98)
@@ -4955,6 +5165,7 @@ function OzChordTrack.run_compact_popout_panel()
     active_tab = (initial_tab == "follow") and "snap" or initial_tab,
     tab_scroll = { snap = 0, theme = 0 },
     cut_overlaps_after_snap = get_cut_overlaps_after_snap_enabled(),
+    allow_snap_inversions = get_allow_snap_inversions_enabled(),
     block_theme = normalize_chord_block_theme(reaper.GetExtState(PANEL_SECTION, "BLOCK_THEME")),
     timeline_calibration_px = get_timeline_calibration_px(),
     new_note_snap_pipeline_mode = get_new_note_snap_pipeline_mode(),
@@ -5045,7 +5256,7 @@ function OzChordTrack.run_compact_popout_panel()
   local function apply_snap_selected_midi_menu(x, y)
     gfx.x = x
     gfx.y = y
-    local menu_result = gfx.showmenu("Chords + Scales|Chords Only|Scales Only")
+    local menu_result = gfx.showmenu("Chords + Scales|Chords Only|Scales Only|Melodic Flow")
     if menu_result <= 0 then
       return
     end
@@ -5055,6 +5266,8 @@ function OzChordTrack.run_compact_popout_panel()
       mode = SNAP_MODE_CHORD_ONLY
     elseif menu_result == 3 then
       mode = SNAP_MODE_SCALE_ONLY
+    elseif menu_result == 4 then
+      mode = SNAP_MODE_MELODIC_FLOW
     end
 
     local ok, result = snap_selected_midi_internal(mode)
@@ -5069,7 +5282,7 @@ function OzChordTrack.run_compact_popout_panel()
   local function apply_one_click_menu(x, y)
     gfx.x = x
     gfx.y = y
-    local menu_result = gfx.showmenu("Chords + Scales|Chords Only|Scales Only")
+    local menu_result = gfx.showmenu("Chords + Scales|Chords Only|Scales Only|Melodic Flow")
     if menu_result <= 0 then
       return
     end
@@ -5079,6 +5292,8 @@ function OzChordTrack.run_compact_popout_panel()
       mode = SNAP_MODE_CHORD_ONLY
     elseif menu_result == 3 then
       mode = SNAP_MODE_SCALE_ONLY
+    elseif menu_result == 4 then
+      mode = SNAP_MODE_MELODIC_FLOW
     end
 
     local ok, result = one_click_setup_sync_snap_internal(mode)
@@ -5343,6 +5558,7 @@ function OzChordTrack.run_compact_popout_panel()
 
     local current_state = load_state()
     ui_state.cut_overlaps_after_snap = get_cut_overlaps_after_snap_enabled()
+    ui_state.allow_snap_inversions = get_allow_snap_inversions_enabled()
     local chord_track = find_track_by_guid(current_state.track_guid)
     local _, selected_infos = selected_tracks_auto_snap_arm_summary(chord_track)
     ui_state.block_theme = normalize_chord_block_theme(reaper.GetExtState(PANEL_SECTION, "BLOCK_THEME"))
@@ -5459,7 +5675,7 @@ function OzChordTrack.run_compact_popout_panel()
     end
 
     local function apply_selected_mode(mode)
-      local mapped_snap_mode = auto_snap_arm_mode_to_snap_mode(mode)
+      local mapped_snap_mode = auto_snap_arm_mode_to_snap_mode(mode) or normalize_snap_mode(mode)
       if not mapped_snap_mode then
         set_status("Invalid snap method.")
         return
@@ -5524,6 +5740,9 @@ function OzChordTrack.run_compact_popout_panel()
         local pipeline_mode = normalize_new_note_snap_pipeline_mode(ui_state.new_note_snap_pipeline_mode)
         local selected_snap_mode = normalize_snap_mode(ui_state.new_note_snap_mode)
         local selected_mode_snap = selected_mode and auto_snap_arm_mode_to_snap_mode(selected_mode) or nil
+        if selected_snap_mode == SNAP_MODE_MELODIC_FLOW and selected_mode_snap == SNAP_MODE_CHORD_SCALE then
+          selected_mode_snap = SNAP_MODE_MELODIC_FLOW
+        end
         local effective_snap_mode = normalize_snap_mode(selected_mode_snap or selected_snap_mode)
 
         local runtime_running = false
@@ -5573,11 +5792,12 @@ function OzChordTrack.run_compact_popout_panel()
           { id = AUTO_SNAP_ARM_MODE_CHORDS, label = "Chords" },
           { id = AUTO_SNAP_ARM_MODE_SCALES, label = "Scales" },
           { id = AUTO_SNAP_ARM_MODE_CHORDS_SCALES, label = "Chords + Scales" },
+          { id = SNAP_MODE_MELODIC_FLOW, label = "Melodic Flow" },
         }
 
         for i = 1, #modes do
           local mode = modes[i]
-          local mode_snap = auto_snap_arm_mode_to_snap_mode(mode.id)
+          local mode_snap = auto_snap_arm_mode_to_snap_mode(mode.id) or normalize_snap_mode(mode.id)
           local marker = (mode_snap == effective_snap_mode) and "(●) " or "(○) "
           button_row(marker .. mode.label, function() apply_selected_mode(mode.id) end)
         end
@@ -5591,6 +5811,15 @@ function OzChordTrack.run_compact_popout_panel()
         end
         label(runtime_detail, meta_font, runtime_r, runtime_g, runtime_b)
         label("Current method: " .. snap_mode_to_label(effective_snap_mode), meta_font, 0.80, 0.80, 0.84)
+
+        spacer(spacer_h)
+        label("Voicing", heading_font, 0.95, 0.95, 0.98)
+        button_row((ui_state.allow_snap_inversions and "[x] " or "[ ] ") .. "Allow snap inversions", function()
+          local next_value = not ui_state.allow_snap_inversions
+          set_allow_snap_inversions_enabled(next_value)
+          ui_state.allow_snap_inversions = next_value
+          set_status(format_allow_snap_inversions_status(next_value))
+        end)
 
         spacer(spacer_h)
         label("Input Snap Utilities", heading_font, 0.95, 0.95, 0.98)
