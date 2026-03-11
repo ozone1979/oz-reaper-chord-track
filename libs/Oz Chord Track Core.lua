@@ -130,31 +130,72 @@ function mode_has_any_notes(mode) (
   : ((gmem[GMEM_CHORD_COUNT] > 0.5) || (gmem[GMEM_SCALE_COUNT] > 0.5));
 );
 
-function nearest_allowed_note(note, mode) local(base_oct, src_pc, step, up_pc, down_pc) (
-  base_oct = floor(note / 12) * 12;
-  src_pc = normalize_pc(note);
+function nearest_allowed_note_unbounded(note, mode) local(best_note, best_distance, candidate, distance, pc) (
+  best_note = -1;
+  best_distance = 999;
 
-  is_pc_enabled_for_mode(src_pc, mode) ? note : (
-    step = 1;
-    loop(12,
-      up_pc = normalize_pc(src_pc + step);
-      down_pc = normalize_pc(src_pc - step);
-
-      is_pc_enabled_for_mode(down_pc, mode) ? (
-        note = base_oct + down_pc;
-        step = 100;
-      ) : is_pc_enabled_for_mode(up_pc, mode) ? (
-        note = base_oct + up_pc;
-        step = 100;
+  candidate = 0;
+  loop(128,
+    pc = normalize_pc(candidate);
+    is_pc_enabled_for_mode(pc, mode) ? (
+      distance = abs(candidate - note);
+      (distance < best_distance || (distance == best_distance && (best_note < 0 || candidate < best_note))) ? (
+        best_distance = distance;
+        best_note = candidate;
       );
+    );
+    candidate += 1;
+  );
 
-      step += 1;
+  best_note >= 0 ? best_note : note;
+);
+
+function nearest_allowed_note(note, mode, min_note, max_note) local(best_note, best_distance, candidate, distance, pc) (
+  min_note < 0 ? min_note = 0;
+  max_note > 127 ? max_note = 127;
+  min_note > max_note ? (
+    nearest_allowed_note_unbounded(note, mode);
+  ) : (
+    best_note = -1;
+    best_distance = 999;
+
+    candidate = min_note | 0;
+    loop((max_note - min_note + 1) | 0,
+      pc = normalize_pc(candidate);
+      is_pc_enabled_for_mode(pc, mode) ? (
+        distance = abs(candidate - note);
+        (distance < best_distance || (distance == best_distance && (best_note < 0 || candidate < best_note))) ? (
+          best_distance = distance;
+          best_note = candidate;
+        );
+      );
+      candidate += 1;
     );
 
-    note < 0 ? note = 0;
-    note > 127 ? note = 127;
-    note;
+    best_note >= 0 ? best_note : nearest_allowed_note_unbounded(note, mode);
   );
+);
+
+function neighboring_snapped_bounds(chan, note) local(scan_note, mapped, key) (
+  min_bound = -1;
+  max_bound = 128;
+
+  scan_note = 0;
+  loop(128,
+    key = chan * 128 + scan_note;
+    mapped = map_note[key];
+
+    mapped >= 0 ? (
+      scan_note < note ? (
+        mapped > min_bound ? min_bound = mapped;
+      ) : scan_note > note ? (
+        mapped < max_bound ? max_bound = mapped;
+      );
+    );
+
+    scan_note += 1;
+  );
+
 );
 
 @slider
@@ -178,7 +219,8 @@ while (
   key = chan * 128 + note;
 
   (enabled && running && mode_has_any_notes(mode) && status == 144 && velocity > 0) ? (
-    snapped_note = nearest_allowed_note(note, mode);
+    neighboring_snapped_bounds(chan, note);
+    snapped_note = nearest_allowed_note(note, mode, min_bound + 1, max_bound - 1);
     map_note[key] = snapped_note;
     midisend(offset, msg1, (msg23 & 65280) | snapped_note);
   ) : ((status == 128 || (status == 144 && velocity == 0)) ? (
