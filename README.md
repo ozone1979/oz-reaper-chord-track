@@ -25,6 +25,7 @@ This script set gives a Chord Track-style workflow in REAPER with:
 - `libs/Oz Chord Track - Start input snap manager (experimental).lua` (internal)
 - `libs/Oz Chord Track - Stop input snap manager (experimental).lua` (internal)
 - `libs/Oz Chord Track Core.lua` (internal implementation)
+- `libs/Oz Chord Track Snap Settings.lua` (internal snap settings helper)
 - `libs/Oz Chord Track Loader.lua` (shared helper/loader for wrappers and internal script resolution)
 - `Effects/Oz Chord Track/Oz Chord Track Input Snap` (JSFX companion for manager)
 

@@ -24,6 +24,9 @@ local TIMELINE_CALIBRATION_MAX = 32
 local TIMELINE_CALIBRATION_COARSE_STEP = 1.0
 local TIMELINE_CALIBRATION_FINE_STEP = 0.5
 
+local CORE_DIR = debug.getinfo(1, "S").source:match("@?(.*[\\/])") or ""
+local SnapSettings = dofile(CORE_DIR .. "Oz Chord Track Snap Settings.lua")
+
 local AUTO_SNAP_ARM_MODE_OFF = "off"
 local AUTO_SNAP_ARM_MODE_CHORDS = "chords"
 local AUTO_SNAP_ARM_MODE_SCALES = "scales"
@@ -583,11 +586,6 @@ local function snap_mode_to_auto_snap_arm_mode(mode)
   return nil
 end
 
-local function snap_mode_requires_scale(mode)
-  local normalized = normalize_snap_mode(mode)
-  return normalized == SNAP_MODE_SCALE_ONLY or normalized == SNAP_MODE_CHORD_SCALE
-end
-
 local get_auto_snap_arm_mode_for_track
 
 local function selected_tracks_follow_arming_state(infos)
@@ -731,19 +729,6 @@ end
 
 local function set_cut_overlaps_after_snap_enabled(enabled)
   reaper.SetProjExtState(0, EXT_SECTION, CUT_OVERLAPS_AFTER_SNAP_KEY, enabled and "1" or "0")
-end
-
-local function get_allow_snap_inversions_enabled()
-  local _, stored = reaper.GetProjExtState(0, EXT_SECTION, ALLOW_SNAP_INVERSIONS_KEY)
-  if not stored or stored == "" then
-    return false
-  end
-  stored = tostring(stored):lower()
-  return stored == "1" or stored == "true" or stored == "yes" or stored == "on"
-end
-
-local function set_allow_snap_inversions_enabled(enabled)
-  reaper.SetProjExtState(0, EXT_SECTION, ALLOW_SNAP_INVERSIONS_KEY, enabled and "1" or "0")
 end
 
 local function round_half_away_from_zero(value)
@@ -1840,7 +1825,7 @@ local function snap_take_notes(take, chord_notes, scale_set, mode, start_note_in
 
   local changed = 0
   local processed = 0
-  local allow_inversions = get_allow_snap_inversions_enabled()
+  local allow_inversions = SnapSettings.get_proj_bool(0, EXT_SECTION, ALLOW_SNAP_INVERSIONS_KEY, false)
   local current_group_start_ppq = nil
   local current_group_channel = nil
   local last_group_snapped_pitch = nil
@@ -2036,7 +2021,7 @@ local function snap_selected_midi_internal(mode)
     return false, err
   end
 
-  if snap_mode_requires_scale(snap_mode) and set_count(state.scale_pcs) == 0 then
+  if SnapSettings.mode_requires_scale(snap_mode, SNAP_MODE_SCALE_ONLY, SNAP_MODE_CHORD_SCALE) and set_count(state.scale_pcs) == 0 then
     return false, "No scale is stored yet. Run the sync scale action from the MIDI editor first."
   end
 
@@ -2144,13 +2129,6 @@ local function format_cut_overlaps_status(enabled)
   return "Cut overlaps after snap disabled."
 end
 
-local function format_allow_snap_inversions_status(enabled)
-  if enabled then
-    return "Allow snap inversions enabled."
-  end
-  return "Allow snap inversions disabled."
-end
-
 local function format_theme_set_status(theme)
   return "Chord block theme set to " .. chord_block_theme_to_display_label(theme) .. "."
 end
@@ -2203,7 +2181,8 @@ end
 
 local function targets_need_scale(targets)
   for i = 1, #targets do
-    if snap_mode_requires_scale(targets[i].snap_mode) then
+    local target_mode = normalize_snap_mode(targets[i].snap_mode)
+    if SnapSettings.mode_requires_scale(target_mode, SNAP_MODE_SCALE_ONLY, SNAP_MODE_CHORD_SCALE) then
       return true
     end
   end
@@ -2794,7 +2773,7 @@ local function armed_tracks_need_scale(chord_track, mode)
     if track ~= chord_track and is_live_target_track(track, mode) then
       local auto_snap_arm_mode = get_auto_snap_arm_mode_for_track(track)
       local snap_mode = auto_snap_arm_mode_to_snap_mode(auto_snap_arm_mode)
-      if snap_mode and snap_mode_requires_scale(snap_mode) then
+      if snap_mode and SnapSettings.mode_requires_scale(snap_mode, SNAP_MODE_SCALE_ONLY, SNAP_MODE_CHORD_SCALE) then
         return true
       end
     end
@@ -3026,7 +3005,7 @@ local function start_live_snap_internal(mode)
     end
   else
     local normalized_mode = normalize_snap_mode(live_mode)
-    if snap_mode_requires_scale(normalized_mode) and set_count(state.scale_pcs) == 0 then
+    if SnapSettings.mode_requires_scale(normalized_mode, SNAP_MODE_SCALE_ONLY, SNAP_MODE_CHORD_SCALE) and set_count(state.scale_pcs) == 0 then
       return false, "No scale is stored yet. Run the sync scale action from the MIDI editor first."
     end
     live_mode = normalized_mode
@@ -3384,7 +3363,7 @@ function OzChordTrack.run_dockable_panel()
     block_theme = stored_block_theme,
     compact_mode = stored_compact_mode,
     cut_overlaps_after_snap = stored_cut_overlaps,
-    allow_snap_inversions = get_allow_snap_inversions_enabled(),
+    allow_snap_inversions = SnapSettings.get_proj_bool(0, EXT_SECTION, ALLOW_SNAP_INVERSIONS_KEY, false),
     timeline_calibration_px = stored_timeline_calibration,
     new_note_snap_pipeline_mode = get_new_note_snap_pipeline_mode(),
     new_note_snap_mode = get_new_note_snap_mode(),
@@ -4257,7 +4236,7 @@ function OzChordTrack.run_dockable_panel()
 
     local current_state = load_state()
     ui_state.cut_overlaps_after_snap = get_cut_overlaps_after_snap_enabled()
-    ui_state.allow_snap_inversions = get_allow_snap_inversions_enabled()
+    ui_state.allow_snap_inversions = SnapSettings.get_proj_bool(0, EXT_SECTION, ALLOW_SNAP_INVERSIONS_KEY, false)
     ui_state.timeline_calibration_px = get_timeline_calibration_px()
     ui_state.new_note_snap_pipeline_mode = get_new_note_snap_pipeline_mode()
     ui_state.new_note_snap_mode = get_new_note_snap_mode()
@@ -4817,9 +4796,9 @@ function OzChordTrack.run_dockable_panel()
         label("Voicing", density.heading_font, 0.95, 0.95, 0.98)
         button_row((ui_state.allow_snap_inversions and "[x] " or "[ ] ") .. "Allow snap inversions", function()
           local next_value = not ui_state.allow_snap_inversions
-          set_allow_snap_inversions_enabled(next_value)
+          SnapSettings.set_proj_bool(0, EXT_SECTION, ALLOW_SNAP_INVERSIONS_KEY, next_value)
           ui_state.allow_snap_inversions = next_value
-          set_status(format_allow_snap_inversions_status(next_value))
+          set_status(SnapSettings.toggle_status("Allow snap inversions", next_value))
         end)
 
         spacer(density.spacer_h)
@@ -5140,7 +5119,7 @@ function OzChordTrack.run_compact_popout_panel()
     active_tab = (initial_tab == "follow") and "snap" or initial_tab,
     tab_scroll = { snap = 0, theme = 0 },
     cut_overlaps_after_snap = get_cut_overlaps_after_snap_enabled(),
-    allow_snap_inversions = get_allow_snap_inversions_enabled(),
+    allow_snap_inversions = SnapSettings.get_proj_bool(0, EXT_SECTION, ALLOW_SNAP_INVERSIONS_KEY, false),
     block_theme = normalize_chord_block_theme(reaper.GetExtState(PANEL_SECTION, "BLOCK_THEME")),
     timeline_calibration_px = get_timeline_calibration_px(),
     new_note_snap_pipeline_mode = get_new_note_snap_pipeline_mode(),
@@ -5533,7 +5512,7 @@ function OzChordTrack.run_compact_popout_panel()
 
     local current_state = load_state()
     ui_state.cut_overlaps_after_snap = get_cut_overlaps_after_snap_enabled()
-    ui_state.allow_snap_inversions = get_allow_snap_inversions_enabled()
+    ui_state.allow_snap_inversions = SnapSettings.get_proj_bool(0, EXT_SECTION, ALLOW_SNAP_INVERSIONS_KEY, false)
     local chord_track = find_track_by_guid(current_state.track_guid)
     local _, selected_infos = selected_tracks_auto_snap_arm_summary(chord_track)
     ui_state.block_theme = normalize_chord_block_theme(reaper.GetExtState(PANEL_SECTION, "BLOCK_THEME"))
@@ -5791,9 +5770,9 @@ function OzChordTrack.run_compact_popout_panel()
         label("Voicing", heading_font, 0.95, 0.95, 0.98)
         button_row((ui_state.allow_snap_inversions and "[x] " or "[ ] ") .. "Allow snap inversions", function()
           local next_value = not ui_state.allow_snap_inversions
-          set_allow_snap_inversions_enabled(next_value)
+          SnapSettings.set_proj_bool(0, EXT_SECTION, ALLOW_SNAP_INVERSIONS_KEY, next_value)
           ui_state.allow_snap_inversions = next_value
-          set_status(format_allow_snap_inversions_status(next_value))
+          set_status(SnapSettings.toggle_status("Allow snap inversions", next_value))
         end)
 
         spacer(spacer_h)

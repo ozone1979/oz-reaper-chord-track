@@ -36,6 +36,7 @@ $supportFiles = @(
     "Oz Chord Track Core.lua",
     "libs/Oz Chord Track Loader.lua",
     "libs/Oz Chord Track Core.lua",
+    "libs/Oz Chord Track Snap Settings.lua",
     "libs/Oz Chord Track - Start input snap manager (experimental).lua",
     "libs/Oz Chord Track - Stop input snap manager (experimental).lua"
 )
