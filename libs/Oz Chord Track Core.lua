@@ -1632,47 +1632,7 @@ local function nearest_pitch(original_pitch, allowed_pcs)
 
   return original_pitch
 end
-
-local function nearest_pitch_at_or_above(original_pitch, allowed_pcs, min_pitch)
-  local floor_pitch = math.max(0, math.floor(tonumber(min_pitch) or 0))
-  local best = nil
-  local best_distance = math.huge
-
-  for candidate = floor_pitch, 127 do
-    if allowed_pcs[candidate % 12] then
-      local distance = math.abs(candidate - original_pitch)
-      if distance < best_distance or (distance == best_distance and (best == nil or candidate < best)) then
-        best = candidate
-        best_distance = distance
-      end
-    end
-  end
-
-  return best
-end
-
-local WHITE_KEY_INDEX_BY_PC = {
-  [0] = 1,
-  [2] = 2,
-  [4] = 3,
-  [5] = 4,
-  [7] = 5,
-  [9] = 6,
-  [11] = 7,
-}
-
-local function rotate_pitch_classes_from_root(pitch_set, root_pc)
-  local ordered = {}
-  for offset = 0, 11 do
-    local pc = (root_pc + offset) % 12
-    if pitch_set[pc] then
-      ordered[#ordered + 1] = offset
-    end
-  end
-  return ordered
-end
-
-local function build_melodic_flow_degree_offsets(chord_set, scale_set)
+local function melodic_flow_pitch(original_pitch, chord_set, scale_set)
   local root_pc = nil
   for pc = 0, 11 do
     if chord_set[pc] then
@@ -1681,13 +1641,19 @@ local function build_melodic_flow_degree_offsets(chord_set, scale_set)
     end
   end
   if root_pc == nil then
-    return nil, nil
+    return nil
   end
 
   local source_set = set_count(scale_set) > 0 and scale_set or chord_set
-  local ordered_intervals = rotate_pitch_classes_from_root(source_set, root_pc)
+  local ordered_intervals = {}
+  for offset = 0, 11 do
+    local pc = (root_pc + offset) % 12
+    if source_set[pc] then
+      ordered_intervals[#ordered_intervals + 1] = offset
+    end
+  end
   if #ordered_intervals == 0 then
-    return nil, nil
+    return nil
   end
 
   local degree_offsets = {}
@@ -1698,36 +1664,10 @@ local function build_melodic_flow_degree_offsets(chord_set, scale_set)
     degree_offsets[i] = ordered_intervals[wrapped_index] + octave_offset
   end
 
-  return root_pc, degree_offsets
-end
-
-local function clamp_midi_pitch(pitch)
-  if pitch < 0 then return 0 end
-  if pitch > 127 then return 127 end
-  return pitch
-end
-
-local function choose_black_key_passing_tone(original_pitch, lower_target, upper_target)
-  if upper_target <= lower_target then
-    upper_target = lower_target + 1
-  end
-
-  local low_candidate = lower_target + 1
-  local high_candidate = upper_target - 1
-  if high_candidate < low_candidate then
-    high_candidate = low_candidate
-  end
-
-  if math.abs(original_pitch - high_candidate) < math.abs(original_pitch - low_candidate) then
-    return high_candidate
-  end
-  return low_candidate
-end
-
-local function melodic_flow_pitch(original_pitch, chord_set, scale_set)
-  local root_pc, degree_offsets = build_melodic_flow_degree_offsets(chord_set, scale_set)
-  if not root_pc or not degree_offsets then
-    return nil
+  local function clamp_midi_pitch(pitch)
+    if pitch < 0 then return 0 end
+    if pitch > 127 then return 127 end
+    return pitch
   end
 
   local base_oct = math.floor(original_pitch / 12) * 12
@@ -1737,7 +1677,16 @@ local function melodic_flow_pitch(original_pitch, chord_set, scale_set)
   end
 
   local pc = original_pitch % 12
-  local white_index = WHITE_KEY_INDEX_BY_PC[pc]
+  local white_index = nil
+  if pc == 0 then white_index = 1
+  elseif pc == 2 then white_index = 2
+  elseif pc == 4 then white_index = 3
+  elseif pc == 5 then white_index = 4
+  elseif pc == 7 then white_index = 5
+  elseif pc == 9 then white_index = 6
+  elseif pc == 11 then white_index = 7
+  end
+
   if white_index then
     return clamp_midi_pitch(white_targets[white_index])
   end
@@ -1754,7 +1703,23 @@ local function melodic_flow_pitch(original_pitch, chord_set, scale_set)
     return nil
   end
 
-  local passing = choose_black_key_passing_tone(original_pitch, white_targets[pair[1]], white_targets[pair[2]])
+  local lower_target = white_targets[pair[1]]
+  local upper_target = white_targets[pair[2]]
+  if upper_target <= lower_target then
+    upper_target = lower_target + 1
+  end
+
+  local low_candidate = lower_target + 1
+  local high_candidate = upper_target - 1
+  if high_candidate < low_candidate then
+    high_candidate = low_candidate
+  end
+
+  local passing = low_candidate
+  if math.abs(original_pitch - high_candidate) < math.abs(original_pitch - low_candidate) then
+    passing = high_candidate
+  end
+
   return clamp_midi_pitch(passing)
 end
 
@@ -1902,8 +1867,19 @@ local function snap_take_notes(take, chord_notes, scale_set, mode, start_note_in
         end
 
         if (not allow_inversions) and last_group_snapped_pitch ~= nil and snapped_pitch < last_group_snapped_pitch then
-          local non_inverted = nearest_pitch_at_or_above(pitch, allowed_set, last_group_snapped_pitch)
-          if non_inverted ~= nil then
+          local floor_pitch = math.max(0, math.floor(last_group_snapped_pitch))
+          local non_inverted = nil
+          local best_distance = math.huge
+          for candidate = floor_pitch, 127 do
+            if allowed_set[candidate % 12] then
+              local distance = math.abs(candidate - pitch)
+              if distance < best_distance or (distance == best_distance and (non_inverted == nil or candidate < non_inverted)) then
+                non_inverted = candidate
+                best_distance = distance
+              end
+            end
+          end
+          if non_inverted then
             snapped_pitch = non_inverted
           end
         end
