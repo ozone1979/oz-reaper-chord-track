@@ -3392,7 +3392,6 @@ function OzChordTrack.run_dockable_panel()
   local stored_block_theme = normalize_chord_block_theme(reaper.GetExtState(PANEL_SECTION, "BLOCK_THEME"))
   local stored_compact_mode = reaper.GetExtState(PANEL_SECTION, "COMPACT_MODE") == "1"
   local stored_cut_overlaps = get_cut_overlaps_after_snap_enabled()
-  local stored_allow_inversions = get_allow_snap_inversions_enabled()
   local stored_timeline_calibration = get_timeline_calibration_px()
 
   gfx.init("Chord Track", 680, 980, dock_state, 150, 120)
@@ -3409,7 +3408,7 @@ function OzChordTrack.run_dockable_panel()
     block_theme = stored_block_theme,
     compact_mode = stored_compact_mode,
     cut_overlaps_after_snap = stored_cut_overlaps,
-    allow_snap_inversions = stored_allow_inversions,
+    allow_snap_inversions = get_allow_snap_inversions_enabled(),
     timeline_calibration_px = stored_timeline_calibration,
     new_note_snap_pipeline_mode = get_new_note_snap_pipeline_mode(),
     new_note_snap_mode = get_new_note_snap_mode(),
