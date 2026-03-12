@@ -16,6 +16,7 @@ local GMEM_SCALE_COUNT = 2
 local GMEM_HEARTBEAT = 3
 local GMEM_RUNNING = 4
 local GMEM_ALLOW_INVERSIONS = 5
+local GMEM_CHORD_ROOT = 6
 local GMEM_CHORD_BASE = 8
 local GMEM_SCALE_BASE = 24
 
@@ -24,11 +25,13 @@ local AUTO_SNAP_ARM_MODE_OFF = "off"
 local AUTO_SNAP_ARM_MODE_CHORDS = "chords"
 local AUTO_SNAP_ARM_MODE_SCALES = "scales"
 local AUTO_SNAP_ARM_MODE_CHORDS_SCALES = "chords_scales"
+local AUTO_SNAP_ARM_MODE_MELODIC_FLOW = "melodic_flow"
 
 local MODE_TO_JSFX_PARAM = {
   [AUTO_SNAP_ARM_MODE_CHORDS] = 0,
   [AUTO_SNAP_ARM_MODE_SCALES] = 1,
   [AUTO_SNAP_ARM_MODE_CHORDS_SCALES] = 2,
+  [AUTO_SNAP_ARM_MODE_MELODIC_FLOW] = 3,
 }
 
 local JSFX_ADD_NAME_CANDIDATES = {
@@ -111,9 +114,9 @@ local function normalize_auto_snap_arm_mode(mode)
   if mode == "chord_only" then return AUTO_SNAP_ARM_MODE_CHORDS end
   if mode == "scale_only" then return AUTO_SNAP_ARM_MODE_SCALES end
   if mode == "chord_scale" then return AUTO_SNAP_ARM_MODE_CHORDS_SCALES end
-  if mode == "melodic_flow" then return AUTO_SNAP_ARM_MODE_CHORDS_SCALES end
+  if mode == "melodic_flow" then return AUTO_SNAP_ARM_MODE_MELODIC_FLOW end
 
-  if mode == AUTO_SNAP_ARM_MODE_CHORDS or mode == AUTO_SNAP_ARM_MODE_SCALES or mode == AUTO_SNAP_ARM_MODE_CHORDS_SCALES then
+  if mode == AUTO_SNAP_ARM_MODE_CHORDS or mode == AUTO_SNAP_ARM_MODE_SCALES or mode == AUTO_SNAP_ARM_MODE_CHORDS_SCALES or mode == AUTO_SNAP_ARM_MODE_MELODIC_FLOW then
     return mode
   end
 
@@ -127,7 +130,7 @@ local function normalize_override_mode(mode)
   if value == "chord_only" then return AUTO_SNAP_ARM_MODE_CHORDS end
   if value == "scale_only" then return AUTO_SNAP_ARM_MODE_SCALES end
   if value == "chord_scale" then return AUTO_SNAP_ARM_MODE_CHORDS_SCALES end
-  if value == "melodic_flow" then return AUTO_SNAP_ARM_MODE_CHORDS_SCALES end
+  if value == "melodic_flow" then return AUTO_SNAP_ARM_MODE_MELODIC_FLOW end
 
   value = normalize_auto_snap_arm_mode(value)
   if value == AUTO_SNAP_ARM_MODE_OFF then
@@ -169,6 +172,7 @@ local function gather_chord_notes(chord_track)
               start_time = start_time,
               end_time = end_time,
               pc = pitch % 12,
+              pitch = pitch,
             }
           end
         end
@@ -186,6 +190,8 @@ end
 local function chord_pcs_at_time(chord_notes, time_position)
   local pitch_set = {}
   local found = 0
+  local lowest_pitch = nil
+  local root_pc = nil
 
   for i = 1, #chord_notes do
     local note = chord_notes[i]
@@ -197,22 +203,35 @@ local function chord_pcs_at_time(chord_notes, time_position)
         pitch_set[note.pc] = true
         found = found + 1
       end
+
+      local note_pitch = tonumber(note.pitch)
+      if note_pitch and (lowest_pitch == nil or note_pitch < lowest_pitch) then
+        lowest_pitch = note_pitch
+        root_pc = note.pc
+      end
     end
   end
 
-  return pitch_set, found
+  return pitch_set, found, root_pc
 end
 
-local function write_shared_sets(runtime_state, chord_set, scale_set)
+local function write_shared_sets(runtime_state, chord_set, scale_set, chord_root_pc)
   local chord_count = set_count(chord_set)
   local scale_count = set_count(scale_set)
-  local signature = set_to_signature(chord_set) .. "|" .. set_to_signature(scale_set)
+  local chord_root = tonumber(chord_root_pc)
+  if chord_root == nil then
+    chord_root = -1
+  else
+    chord_root = chord_root % 12
+  end
+  local signature = set_to_signature(chord_set) .. "|" .. set_to_signature(scale_set) .. "|" .. tostring(chord_root)
 
   if signature ~= runtime_state.last_shared_signature then
     runtime_state.shared_version = runtime_state.shared_version + 1
 
     reaper.gmem_write(GMEM_CHORD_COUNT, chord_count)
     reaper.gmem_write(GMEM_SCALE_COUNT, scale_count)
+    reaper.gmem_write(GMEM_CHORD_ROOT, chord_root)
 
     for pc = 0, 11 do
       reaper.gmem_write(GMEM_CHORD_BASE + pc, chord_set[pc] and 1 or 0)
@@ -233,6 +252,7 @@ local function write_shared_sets(runtime_state, chord_set, scale_set)
 
   runtime_state.last_chord_count = chord_count
   runtime_state.last_scale_count = scale_count
+  runtime_state.last_chord_root = chord_root
 end
 
 local function clear_shared_sets(runtime_state)
@@ -241,6 +261,7 @@ local function clear_shared_sets(runtime_state)
   reaper.gmem_write(GMEM_CHORD_COUNT, 0)
   reaper.gmem_write(GMEM_SCALE_COUNT, 0)
   reaper.gmem_write(GMEM_ALLOW_INVERSIONS, 0)
+  reaper.gmem_write(GMEM_CHORD_ROOT, -1)
   for pc = 0, 11 do
     reaper.gmem_write(GMEM_CHORD_BASE + pc, 0)
     reaper.gmem_write(GMEM_SCALE_BASE + pc, 0)
@@ -560,6 +581,7 @@ local function main()
     shared_version = math.floor(as_number(reaper.gmem_read(GMEM_VERSION)) or 0),
     last_chord_count = 0,
     last_scale_count = 0,
+    last_chord_root = -1,
   }
 
   reaper.SetExtState(MANAGER_SECTION, RUN_TOKEN_KEY, runtime_state.token, false)
@@ -599,12 +621,13 @@ local function main()
     end
 
     local chord_set = {}
+    local chord_root_pc = nil
     if chord_track and #runtime_state.chord_notes > 0 then
       local current_position = get_play_or_cursor_position()
-      chord_set = chord_pcs_at_time(runtime_state.chord_notes, current_position)
+      chord_set, _, chord_root_pc = chord_pcs_at_time(runtime_state.chord_notes, current_position)
     end
 
-    write_shared_sets(runtime_state, chord_set, scale_set)
+    write_shared_sets(runtime_state, chord_set, scale_set, chord_root_pc)
 
     local active_targets, fx_enabled_targets, fx_missing, mode_override, duplicate_fx_removed, fx_mode_mismatch, fx_config_errors = manage_track_input_fx(chord_track)
 

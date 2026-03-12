@@ -31,6 +31,7 @@ local AUTO_SNAP_ARM_MODE_OFF = "off"
 local AUTO_SNAP_ARM_MODE_CHORDS = "chords"
 local AUTO_SNAP_ARM_MODE_SCALES = "scales"
 local AUTO_SNAP_ARM_MODE_CHORDS_SCALES = "chords_scales"
+local AUTO_SNAP_ARM_MODE_MELODIC_FLOW = "melodic_flow"
 local AUTO_SNAP_ARM_MODE_DEFAULT = AUTO_SNAP_ARM_MODE_OFF
 local AUTO_SNAP_ARM_KEY_PREFIX = "AUTO_SNAP_ARM_MODE_"
 
@@ -39,6 +40,7 @@ local AUTO_SNAP_ARM_MODE_ORDER = {
   AUTO_SNAP_ARM_MODE_CHORDS,
   AUTO_SNAP_ARM_MODE_SCALES,
   AUTO_SNAP_ARM_MODE_CHORDS_SCALES,
+  AUTO_SNAP_ARM_MODE_MELODIC_FLOW,
 }
 
 local AUTO_SNAP_ARM_MODE_LABELS = {
@@ -46,12 +48,14 @@ local AUTO_SNAP_ARM_MODE_LABELS = {
   [AUTO_SNAP_ARM_MODE_CHORDS] = "Chords",
   [AUTO_SNAP_ARM_MODE_SCALES] = "Scales",
   [AUTO_SNAP_ARM_MODE_CHORDS_SCALES] = "Chords + Scales",
+  [AUTO_SNAP_ARM_MODE_MELODIC_FLOW] = "Melodic Flow",
 }
 
 local AUTO_SNAP_ARM_MODE_TO_SNAP_MODE = {
   [AUTO_SNAP_ARM_MODE_CHORDS] = "chord_only",
   [AUTO_SNAP_ARM_MODE_SCALES] = "scale_only",
   [AUTO_SNAP_ARM_MODE_CHORDS_SCALES] = "chord_scale",
+  [AUTO_SNAP_ARM_MODE_MELODIC_FLOW] = "melodic_flow",
 }
 
 local SNAP_MODE_CHORD_ONLY = "chord_only"
@@ -98,7 +102,7 @@ local INPUT_SNAP_JSFX_RELATIVE_PATH = "Oz Chord Track/Oz Chord Track Input Snap.
 local INPUT_SNAP_JSFX_SOURCE = [[desc:Oz Chord Track Input Snap
 options:gmem=OZ_REAPER_CHORD_TRACK_INPUT_SNAP
 
-slider1:2<0,2,1{Chords,Scales,Chords+Scales}>Snap Mode
+slider1:3<0,3,1{Chords,Scales,Chords+Scales,Melodic Flow}>Snap Mode
 slider2:1<0,1,1{Off,On}>Enabled
 
 @init
@@ -107,8 +111,13 @@ GMEM_CHORD_COUNT = 1;
 GMEM_SCALE_COUNT = 2;
 GMEM_RUNNING = 4;
 GMEM_ALLOW_INVERSIONS = 5;
+GMEM_CHORD_ROOT = 6;
 GMEM_CHORD_BASE = 8;
 GMEM_SCALE_BASE = 24;
+
+ORDERED = 4096;
+DEGREES = 4128;
+WHITE = 4160;
 
 i = 0;
 loop(2048,
@@ -122,13 +131,19 @@ function normalize_pc(value) local(result) (
   result;
 );
 
+function clamp_midi_note(note) (
+  note < 0 ? note = 0;
+  note > 127 ? note = 127;
+  note;
+);
+
 function is_pc_enabled_for_mode(pc, mode) local(chord_on, scale_on) (
   chord_on = gmem[GMEM_CHORD_BASE + pc] >= 0.5;
   scale_on = gmem[GMEM_SCALE_BASE + pc] >= 0.5;
 
   mode == 0 ? chord_on
   : mode == 1 ? scale_on
-  : (chord_on || scale_on);
+  : (scale_on || chord_on);
 );
 
 function mode_has_any_notes(mode) (
@@ -205,15 +220,199 @@ function neighboring_snapped_bounds(chan, note) local(scan_note, mapped, key) (
 
 );
 
+function get_chord_root_pc() local(root, pc) (
+  root = gmem[GMEM_CHORD_ROOT] | 0;
+
+  (root >= 0 && root <= 11 && gmem[GMEM_CHORD_BASE + root] >= 0.5) ? (
+    root;
+  ) : (
+    root = -1;
+    pc = 0;
+    loop(12,
+      (root < 0 && gmem[GMEM_CHORD_BASE + pc] >= 0.5) ? root = pc;
+      pc += 1;
+    );
+    root < 0 ? 0 : root;
+  );
+);
+
+function white_pc_to_index(pc) (
+  pc == 0 ? 1
+  : pc == 2 ? 2
+  : pc == 4 ? 3
+  : pc == 5 ? 4
+  : pc == 7 ? 5
+  : pc == 9 ? 6
+  : pc == 11 ? 7
+  : 0;
+);
+
+function black_pc_pair_low_index(pc) (
+  pc == 1 ? 1
+  : pc == 3 ? 2
+  : pc == 6 ? 4
+  : pc == 8 ? 5
+  : pc == 10 ? 6
+  : 0;
+);
+
+function melodic_source_has_pc(pc, use_scale) local(chord_on, scale_on) (
+  chord_on = gmem[GMEM_CHORD_BASE + pc] >= 0.5;
+  scale_on = gmem[GMEM_SCALE_BASE + pc] >= 0.5;
+  use_scale ? (scale_on || chord_on) : chord_on;
+);
+
+function melodic_passing_has_pc(pc, use_scale) local(chord_on, scale_on) (
+  chord_on = gmem[GMEM_CHORD_BASE + pc] >= 0.5;
+  scale_on = gmem[GMEM_SCALE_BASE + pc] >= 0.5;
+  use_scale ? scale_on : chord_on;
+);
+
+function build_melodic_white_targets(note) local(root_pc, use_scale, offset, pc, ordered_count, degree, third_index, wrapped_index, octave_offset, base_oct) (
+  root_pc = get_chord_root_pc();
+  use_scale = gmem[GMEM_SCALE_COUNT] > 0.5;
+
+  ordered_count = 0;
+  offset = 0;
+  loop(12,
+    pc = (root_pc + offset) % 12;
+    melodic_source_has_pc(pc, use_scale) ? (
+      ORDERED[ordered_count] = offset;
+      ordered_count += 1;
+    );
+    offset += 1;
+  );
+
+  ordered_count <= 0 ? (
+    ORDERED[0] = 0;
+    ordered_count = 1;
+  );
+
+  degree = 0;
+  loop(7,
+    third_index = degree * 2;
+    wrapped_index = third_index % ordered_count;
+    octave_offset = floor(third_index / ordered_count) * 12;
+    DEGREES[degree] = ORDERED[wrapped_index] + octave_offset;
+    degree += 1;
+  );
+
+  base_oct = floor(note / 12) * 12;
+  degree = 0;
+  loop(7,
+    WHITE[degree] = base_oct + root_pc + DEGREES[degree];
+    degree += 1;
+  );
+);
+
+function melodic_flow_target_unbounded(note) local(pc, white_index, low_pair_index, lower_target, upper_target, candidate, candidate_count, best_note, best_distance, distance, passing_pc, use_scale, low_candidate, high_candidate) (
+  build_melodic_white_targets(note);
+  pc = normalize_pc(note);
+
+  white_index = white_pc_to_index(pc);
+  white_index > 0 ? (
+    clamp_midi_note(WHITE[white_index - 1]);
+  ) : (
+    low_pair_index = black_pc_pair_low_index(pc);
+    low_pair_index <= 0 ? note : (
+      lower_target = WHITE[low_pair_index - 1];
+      upper_target = WHITE[low_pair_index];
+      upper_target <= lower_target ? upper_target = lower_target + 1;
+
+      use_scale = gmem[GMEM_SCALE_COUNT] > 0.5;
+      best_note = -1;
+      best_distance = 999;
+      candidate = floor(lower_target) + 1;
+      candidate_count = (ceil(upper_target) - floor(lower_target) - 1) | 0;
+      candidate_count < 0 ? candidate_count = 0;
+
+      loop(candidate_count,
+        passing_pc = normalize_pc(candidate);
+        melodic_passing_has_pc(passing_pc, use_scale) ? (
+          distance = abs(candidate - note);
+          (distance < best_distance || (distance == best_distance && (best_note < 0 || candidate < best_note))) ? (
+            best_distance = distance;
+            best_note = candidate;
+          );
+        );
+        candidate += 1;
+      );
+
+      best_note >= 0 ? (
+        clamp_midi_note(best_note);
+      ) : (
+        low_candidate = lower_target + 1;
+        high_candidate = upper_target - 1;
+        high_candidate < low_candidate ? high_candidate = low_candidate;
+        abs(note - high_candidate) < abs(note - low_candidate) ? clamp_midi_note(high_candidate) : clamp_midi_note(low_candidate);
+      );
+    );
+  );
+);
+
+function melodic_flow_target(note, min_note, max_note, bounded) local(target, shifted, candidate, best_note, best_distance, distance) (
+  target = melodic_flow_target_unbounded(note);
+
+  bounded ? (
+    min_note < 0 ? min_note = 0;
+    max_note > 127 ? max_note = 127;
+    min_note <= max_note ? (
+      (target < min_note || target > max_note) ? (
+        best_note = -1;
+        best_distance = 999;
+
+        shifted = target;
+        while(shifted < min_note, shifted += 12;);
+        while(shifted > max_note, shifted -= 12;);
+
+        candidate = shifted;
+        (candidate >= min_note && candidate <= max_note) ? (
+          distance = abs(candidate - note);
+          best_note = candidate;
+          best_distance = distance;
+        );
+
+        candidate = shifted + 12;
+        (candidate >= min_note && candidate <= max_note) ? (
+          distance = abs(candidate - note);
+          (distance < best_distance || (distance == best_distance && (best_note < 0 || candidate < best_note))) ? (
+            best_note = candidate;
+            best_distance = distance;
+          );
+        );
+
+        candidate = shifted - 12;
+        (candidate >= min_note && candidate <= max_note) ? (
+          distance = abs(candidate - note);
+          (distance < best_distance || (distance == best_distance && (best_note < 0 || candidate < best_note))) ? (
+            best_note = candidate;
+            best_distance = distance;
+          );
+        );
+
+        best_note >= 0 ? (
+          target = best_note;
+        ) : (
+          target = nearest_allowed_note(note, 2, min_note, max_note);
+        );
+      );
+    );
+  );
+
+  clamp_midi_note(target);
+);
+
 @slider
 mode = slider1 | 0;
 mode < 0 ? mode = 0;
-mode > 2 ? mode = 2;
+mode > 3 ? mode = 3;
 enabled = slider2 >= 0.5;
 
 @block
 running = gmem[GMEM_RUNNING] >= 0.5;
 mode = slider1 | 0;
+mode < 0 ? mode = 0;
+mode > 3 ? mode = 3;
 enabled = slider2 >= 0.5;
 
 while (
@@ -227,11 +426,20 @@ while (
 
   (enabled && running && mode_has_any_notes(mode) && status == 144 && velocity > 0) ? (
     allow_inversions = gmem[GMEM_ALLOW_INVERSIONS] >= 0.5;
-    allow_inversions ? (
-      snapped_note = nearest_allowed_note_unbounded(note, mode);
+    mode == 3 ? (
+      allow_inversions ? (
+        snapped_note = melodic_flow_target(note, 0, 127, 0);
+      ) : (
+        neighboring_snapped_bounds(chan, note);
+        snapped_note = melodic_flow_target(note, min_bound + 1, max_bound - 1, 1);
+      );
     ) : (
-      neighboring_snapped_bounds(chan, note);
-      snapped_note = nearest_allowed_note(note, mode, min_bound + 1, max_bound - 1);
+      allow_inversions ? (
+        snapped_note = nearest_allowed_note_unbounded(note, mode);
+      ) : (
+        neighboring_snapped_bounds(chan, note);
+        snapped_note = nearest_allowed_note(note, mode, min_bound + 1, max_bound - 1);
+      );
     );
     map_note[key] = snapped_note;
     midisend(offset, msg1, (msg23 & 65280) | snapped_note);
@@ -493,7 +701,7 @@ local function normalize_auto_snap_arm_mode(mode)
   if mode == SNAP_MODE_CHORD_ONLY then return AUTO_SNAP_ARM_MODE_CHORDS end
   if mode == SNAP_MODE_SCALE_ONLY then return AUTO_SNAP_ARM_MODE_SCALES end
   if mode == SNAP_MODE_CHORD_SCALE then return AUTO_SNAP_ARM_MODE_CHORDS_SCALES end
-  if mode == SNAP_MODE_MELODIC_FLOW then return AUTO_SNAP_ARM_MODE_CHORDS_SCALES end
+  if mode == SNAP_MODE_MELODIC_FLOW then return AUTO_SNAP_ARM_MODE_MELODIC_FLOW end
 
   if AUTO_SNAP_ARM_MODE_LABELS[mode] then
     return mode
@@ -506,6 +714,7 @@ local function normalize_snap_mode(mode)
   if mode == AUTO_SNAP_ARM_MODE_CHORDS or mode == "chords" then return SNAP_MODE_CHORD_ONLY end
   if mode == AUTO_SNAP_ARM_MODE_SCALES or mode == "scales" then return SNAP_MODE_SCALE_ONLY end
   if mode == AUTO_SNAP_ARM_MODE_CHORDS_SCALES or mode == "chords_scales" then return SNAP_MODE_CHORD_SCALE end
+  if mode == AUTO_SNAP_ARM_MODE_MELODIC_FLOW then return SNAP_MODE_MELODIC_FLOW end
   if mode == "melodicflow" or mode == "melodic flow" then return SNAP_MODE_MELODIC_FLOW end
 
   if SNAP_MODE_LABELS[mode] then
@@ -582,7 +791,7 @@ local function snap_mode_to_auto_snap_arm_mode(mode)
   if normalized == SNAP_MODE_CHORD_ONLY then return AUTO_SNAP_ARM_MODE_CHORDS end
   if normalized == SNAP_MODE_SCALE_ONLY then return AUTO_SNAP_ARM_MODE_SCALES end
   if normalized == SNAP_MODE_CHORD_SCALE then return AUTO_SNAP_ARM_MODE_CHORDS_SCALES end
-  if normalized == SNAP_MODE_MELODIC_FLOW then return AUTO_SNAP_ARM_MODE_CHORDS_SCALES end
+  if normalized == SNAP_MODE_MELODIC_FLOW then return AUTO_SNAP_ARM_MODE_MELODIC_FLOW end
   return nil
 end
 
@@ -1059,6 +1268,7 @@ local function gather_chord_notes(chord_track)
               start_time = start_time,
               end_time = end_time,
               pc = pitch % 12,
+              pitch = pitch,
             }
           end
         end
@@ -1076,6 +1286,8 @@ end
 local function chord_pcs_at_time(chord_notes, time_position)
   local pitch_set = {}
   local found = 0
+  local lowest_pitch = nil
+  local root_pc = nil
 
   for i = 1, #chord_notes do
     local note = chord_notes[i]
@@ -1087,10 +1299,16 @@ local function chord_pcs_at_time(chord_notes, time_position)
         pitch_set[note.pc] = true
         found = found + 1
       end
+
+      local note_pitch = tonumber(note.pitch)
+      if note_pitch and (lowest_pitch == nil or note_pitch < lowest_pitch) then
+        lowest_pitch = note_pitch
+        root_pc = note.pc
+      end
     end
   end
 
-  return pitch_set, found
+  return pitch_set, found, root_pc
 end
 
 local DEGREE_LABELS_BY_INTERVAL = {
@@ -1617,19 +1835,42 @@ local function nearest_pitch(original_pitch, allowed_pcs)
 
   return original_pitch
 end
-local function melodic_flow_pitch(original_pitch, chord_set, scale_set)
+local function melodic_flow_pitch(original_pitch, chord_set, scale_set, chord_root_pc)
   local root_pc = nil
-  for pc = 0, 11 do
-    if chord_set[pc] then
-      root_pc = pc
-      break
+  if type(chord_root_pc) == "number" then
+    local candidate = chord_root_pc % 12
+    if chord_set[candidate] then
+      root_pc = candidate
     end
   end
+
+  if root_pc == nil then
+    for pc = 0, 11 do
+      if chord_set[pc] then
+        root_pc = pc
+        break
+      end
+    end
+  end
+
   if root_pc == nil then
     return nil
   end
 
-  local source_set = set_count(scale_set) > 0 and scale_set or chord_set
+  local scale_count = set_count(scale_set)
+  local source_set = {}
+  if scale_count > 0 then
+    source_set = copy_set(scale_set)
+    for pc = 0, 11 do
+      if chord_set[pc] then
+        source_set[pc] = true
+      end
+    end
+  else
+    source_set = copy_set(chord_set)
+  end
+  local passing_set = scale_count > 0 and scale_set or source_set
+
   local ordered_intervals = {}
   for offset = 0, 11 do
     local pc = (root_pc + offset) % 12
@@ -1700,6 +1941,22 @@ local function melodic_flow_pitch(original_pitch, chord_set, scale_set)
     high_candidate = low_candidate
   end
 
+  local best_passing = nil
+  local best_distance = math.huge
+  for candidate = math.floor(lower_target) + 1, math.ceil(upper_target) - 1 do
+    if passing_set[candidate % 12] then
+      local distance = math.abs(original_pitch - candidate)
+      if distance < best_distance or (distance == best_distance and (best_passing == nil or candidate < best_passing)) then
+        best_passing = candidate
+        best_distance = distance
+      end
+    end
+  end
+
+  if best_passing ~= nil then
+    return clamp_midi_pitch(best_passing)
+  end
+
   local passing = low_candidate
   if math.abs(original_pitch - high_candidate) < math.abs(original_pitch - low_candidate) then
     passing = high_candidate
@@ -1722,12 +1979,21 @@ local function build_allowed_set(mode, chord_set, chord_count, scale_set)
     return {}
   end
 
-  if chord_count > 0 and scale_count > 0 then
-    local both = intersect_sets(chord_set, scale_set)
-    if set_count(both) > 0 then
-      return both
+  if mode == "chord_scale" or mode == "melodic_flow" then
+    local allowed = {}
+    if scale_count > 0 then
+      allowed = copy_set(scale_set)
     end
-    return copy_set(chord_set)
+
+    if chord_count > 0 then
+      for pc = 0, 11 do
+        if chord_set[pc] then
+          allowed[pc] = true
+        end
+      end
+    end
+
+    return allowed
   end
 
   if chord_count > 0 then
@@ -1840,12 +2106,12 @@ local function snap_take_notes(take, chord_notes, scale_set, mode, start_note_in
       end
 
       local note_time = reaper.MIDI_GetProjTimeFromPPQPos(take, start_ppq)
-      local chord_set, chord_count = chord_pcs_at_time(chord_notes, note_time)
+      local chord_set, chord_count, chord_root_pc = chord_pcs_at_time(chord_notes, note_time)
       local allowed_set = build_allowed_set(mode, chord_set, chord_count, scale_set)
       if set_count(allowed_set) > 0 then
         local snapped_pitch = nil
         if normalize_snap_mode(mode) == SNAP_MODE_MELODIC_FLOW then
-          snapped_pitch = melodic_flow_pitch(pitch, chord_set, scale_set)
+          snapped_pitch = melodic_flow_pitch(pitch, chord_set, scale_set, chord_root_pc)
         end
         if snapped_pitch == nil then
           snapped_pitch = nearest_pitch(pitch, allowed_set)
@@ -2989,11 +3255,11 @@ local function start_live_snap_internal(mode)
   local has_targets = has_live_target_tracks(chord_track, live_mode)
   if not has_targets then
     if live_mode == "track_auto_snap_arm_record" then
-      return false, "No live targets found. Record-arm target tracks and set their Auto-snap Arm mode to Chords, Scales, or Chords + Scales."
+      return false, "No live targets found. Record-arm target tracks and set their Auto-snap Arm mode to Chords, Scales, Chords + Scales, or Melodic Flow."
     end
 
     if is_auto_snap_arm_live_mode(live_mode) then
-      return false, "No live targets found. Arm or monitor target tracks and set their Auto-snap Arm mode to Chords, Scales, or Chords + Scales."
+      return false, "No live targets found. Arm or monitor target tracks and set their Auto-snap Arm mode to Chords, Scales, Chords + Scales, or Melodic Flow."
     end
 
     return false, "No live targets found. Arm or monitor target MIDI tracks (not the chord track)."
@@ -3215,7 +3481,16 @@ local function is_legacy_input_snap_jsfx(path)
   if not handle then return false end
   local content = handle:read("*a") or ""
   handle:close()
-  return content:find("gmem_attach", 1, true) ~= nil
+  if content:find("gmem_attach", 1, true) ~= nil then
+    return true
+  end
+
+  -- Reinstall when older script variants do not expose Melodic Flow mode.
+  if content:find("Melodic Flow", 1, true) == nil then
+    return true
+  end
+
+  return false
 end
 
 local function install_input_snap_jsfx()
