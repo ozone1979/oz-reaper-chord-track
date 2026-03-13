@@ -4,6 +4,10 @@ local RUN_TOKEN_KEY = "RUN_TOKEN"
 local STATUS_KEY = "STATUS"
 local SNAP_MODE_OVERRIDE_KEY = "SNAP_MODE_OVERRIDE"
 local ALLOW_SNAP_INVERSIONS_KEY = "ALLOW_SNAP_INVERSIONS"
+local RECORD_TIMING_OFFSET_MS_KEY = "RECORD_TIMING_OFFSET_MS"
+local RECORD_TIMING_OFFSET_MS_DEFAULT = 0
+local RECORD_TIMING_OFFSET_MS_MIN = -150
+local RECORD_TIMING_OFFSET_MS_MAX = 150
 
 local FX_NAME = "JS:Oz Chord Track/Oz Chord Track Input Snap"
 local FX_NAME_FALLBACK = "JS: Oz Chord Track Input Snap"
@@ -63,6 +67,107 @@ local function as_number(value)
     return tonumber(value)
   end
   return nil
+end
+
+local function clamp_record_timing_offset_ms(value)
+  local numeric = tonumber(value) or RECORD_TIMING_OFFSET_MS_DEFAULT
+  if numeric < RECORD_TIMING_OFFSET_MS_MIN then
+    numeric = RECORD_TIMING_OFFSET_MS_MIN
+  elseif numeric > RECORD_TIMING_OFFSET_MS_MAX then
+    numeric = RECORD_TIMING_OFFSET_MS_MAX
+  end
+
+  if math.abs(numeric) < 0.0001 then
+    numeric = 0
+  end
+
+  return numeric
+end
+
+local function get_record_timing_offset_ms()
+  local _, stored = reaper.GetProjExtState(0, EXT_SECTION, RECORD_TIMING_OFFSET_MS_KEY)
+  if not stored or stored == "" then
+    return RECORD_TIMING_OFFSET_MS_DEFAULT
+  end
+
+  return clamp_record_timing_offset_ms(stored)
+end
+
+local function for_each_midi_take_on_track(track, callback)
+  if not track or not callback then return end
+
+  local item_count = reaper.CountTrackMediaItems(track)
+  for item_index = 0, item_count - 1 do
+    local item = reaper.GetTrackMediaItem(track, item_index)
+    local take = reaper.GetActiveTake(item)
+    if take and reaper.TakeIsMIDI(take) then
+      callback(take)
+    end
+  end
+end
+
+local function take_id(take)
+  local _, guid = reaper.GetSetMediaItemTakeInfo_String(take, "GUID", "", false)
+  if guid and guid ~= "" then return guid end
+  return tostring(take)
+end
+
+local function shift_take_note_timing(take, start_note_index, offset_ms)
+  local _, note_count = reaper.MIDI_CountEvts(take)
+  if note_count == 0 then return 0, 0, note_count end
+
+  local offset = tonumber(offset_ms) or 0
+  if math.abs(offset) < 0.0001 then
+    return 0, 0, note_count
+  end
+
+  local from_index = start_note_index or 0
+  if from_index < 0 then from_index = 0 end
+  if from_index >= note_count then return 0, 0, note_count end
+
+  local offset_seconds = offset / 1000.0
+  local changed = 0
+  local processed = 0
+
+  for note_index = from_index, note_count - 1 do
+    local ok, selected, muted, start_ppq, end_ppq, channel, pitch, velocity = reaper.MIDI_GetNote(take, note_index)
+    if ok and not muted then
+      local start_time = reaper.MIDI_GetProjTimeFromPPQPos(take, start_ppq)
+      local end_time = reaper.MIDI_GetProjTimeFromPPQPos(take, end_ppq)
+
+      local new_start_time = start_time + offset_seconds
+      local new_end_time = end_time + offset_seconds
+
+      if new_start_time < 0 then
+        local compensation = -new_start_time
+        new_start_time = 0
+        new_end_time = new_end_time + compensation
+      end
+
+      if new_end_time <= new_start_time then
+        new_end_time = new_start_time + 0.001
+      end
+
+      local new_start_ppq = reaper.MIDI_GetPPQPosFromProjTime(take, new_start_time)
+      local new_end_ppq = reaper.MIDI_GetPPQPosFromProjTime(take, new_end_time)
+      if new_end_ppq <= new_start_ppq then
+        new_end_ppq = new_start_ppq + 1
+      end
+
+      if math.abs(new_start_ppq - start_ppq) > 0.0001 or math.abs(new_end_ppq - end_ppq) > 0.0001 then
+        reaper.MIDI_SetNote(take, note_index, selected, muted, new_start_ppq, new_end_ppq, channel, pitch, velocity, true)
+        changed = changed + 1
+      end
+
+      processed = processed + 1
+    end
+  end
+
+  if changed > 0 then
+    reaper.MIDI_Sort(take)
+  end
+
+  return changed, processed, note_count
 end
 
 local function set_count(pitch_set)
@@ -563,6 +668,81 @@ local function manage_track_input_fx(chord_track)
   return active_targets, fx_enabled_targets, fx_missing, mode_override, duplicate_fx_removed, fx_mode_mismatch, fx_config_errors
 end
 
+local function gather_record_timing_target_tracks(chord_track, mode_override)
+  local targets = {}
+  local target_guids = {}
+
+  local track_count = reaper.CountTracks(0)
+  for i = 0, track_count - 1 do
+    local track = reaper.GetTrack(0, i)
+    if track ~= chord_track then
+      local rec_arm = reaper.GetMediaTrackInfo_Value(track, "I_RECARM")
+      local mode = mode_override or get_auto_snap_arm_mode_for_track(track)
+      local mode_param = MODE_TO_JSFX_PARAM[mode]
+
+      if rec_arm >= 1 and mode_param ~= nil then
+        targets[#targets + 1] = track
+        local guid = get_track_guid(track)
+        if guid and guid ~= "" then
+          target_guids[guid] = true
+        end
+      end
+    end
+  end
+
+  return targets, target_guids
+end
+
+local function apply_record_timing_offset_to_tracks(runtime_state, chord_track, offset_ms, active_targets, include_target_guids, is_recording, should_flush_after_record)
+  local changed_total = 0
+  local processed_total = 0
+  local touched_take_count = 0
+  local seen_take_ids = {}
+
+  local function process_take(take)
+    local id = take_id(take)
+    seen_take_ids[id] = true
+
+    local _, note_count = reaper.MIDI_CountEvts(take)
+    local last_count = tonumber(runtime_state.take_timing_counts[id])
+    if last_count == nil then
+      last_count = note_count
+    end
+
+    local changed, processed, current_count = shift_take_note_timing(take, last_count, offset_ms)
+    runtime_state.take_timing_counts[id] = current_count
+
+    changed_total = changed_total + (tonumber(changed) or 0)
+    processed_total = processed_total + (tonumber(processed) or 0)
+    touched_take_count = touched_take_count + 1
+
+    if (tonumber(changed) or 0) > 0 then
+      reaper.UpdateItemInProject(reaper.GetMediaItemTake_Item(take))
+    end
+  end
+
+  if include_target_guids and next(include_target_guids) then
+    for guid in pairs(include_target_guids) do
+      local track = find_track_by_guid(guid)
+      if track and track ~= chord_track then
+        for_each_midi_take_on_track(track, process_take)
+      end
+    end
+  else
+    for i = 1, #active_targets do
+      for_each_midi_take_on_track(active_targets[i], process_take)
+    end
+  end
+
+  for id in pairs(runtime_state.take_timing_counts) do
+    if not seen_take_ids[id] then
+      runtime_state.take_timing_counts[id] = nil
+    end
+  end
+
+  return changed_total, processed_total, touched_take_count
+end
+
 local function main()
   if not reaper.gmem_attach or not reaper.gmem_write or not reaper.gmem_read then
     reaper.MB("This REAPER build does not support gmem_* APIs required for input snap manager.", "Oz Chord Track", 0)
@@ -582,6 +762,11 @@ local function main()
     last_chord_count = 0,
     last_scale_count = 0,
     last_chord_root = -1,
+    take_timing_counts = {},
+    was_recording = false,
+    pending_record_flush = false,
+    record_stop_time = 0,
+    record_target_guids = {},
   }
 
   reaper.SetExtState(MANAGER_SECTION, RUN_TOKEN_KEY, runtime_state.token, false)
@@ -631,6 +816,67 @@ local function main()
 
     local active_targets, fx_enabled_targets, fx_missing, mode_override, duplicate_fx_removed, fx_mode_mismatch, fx_config_errors = manage_track_input_fx(chord_track)
 
+    local play_state = reaper.GetPlayState()
+    local is_recording = (play_state & 4) == 4
+    local should_flush_after_record = false
+
+    if is_recording then
+      runtime_state.was_recording = true
+      runtime_state.pending_record_flush = false
+    elseif runtime_state.was_recording and (not runtime_state.pending_record_flush) then
+      runtime_state.pending_record_flush = true
+      runtime_state.record_stop_time = reaper.time_precise()
+    end
+
+    if runtime_state.pending_record_flush then
+      should_flush_after_record = true
+    end
+
+    local record_timing_offset_ms = get_record_timing_offset_ms()
+    local apply_record_timing_offset = math.abs(record_timing_offset_ms) >= 0.0001
+    local timing_changed = 0
+    local timing_processed = 0
+    local timing_take_count = 0
+
+    if apply_record_timing_offset then
+      local active_timing_tracks, active_timing_guids = gather_record_timing_target_tracks(chord_track, mode_override)
+
+      if is_recording then
+        for guid in pairs(active_timing_guids) do
+          runtime_state.record_target_guids[guid] = true
+        end
+      end
+
+      local include_guid_set = should_flush_after_record and runtime_state.record_target_guids or nil
+      timing_changed, timing_processed, timing_take_count = apply_record_timing_offset_to_tracks(
+        runtime_state,
+        chord_track,
+        record_timing_offset_ms,
+        active_timing_tracks,
+        include_guid_set,
+        is_recording,
+        should_flush_after_record
+      )
+    else
+      runtime_state.take_timing_counts = {}
+      runtime_state.record_target_guids = {}
+      runtime_state.pending_record_flush = false
+      runtime_state.was_recording = is_recording
+      runtime_state.record_stop_time = 0
+    end
+
+    if should_flush_after_record then
+      local flush_age = reaper.time_precise() - (tonumber(runtime_state.record_stop_time) or 0)
+      local keep_waiting = apply_record_timing_offset and timing_take_count == 0 and flush_age < 6.0
+
+      if not keep_waiting then
+        runtime_state.pending_record_flush = false
+        runtime_state.record_stop_time = 0
+        runtime_state.was_recording = false
+        runtime_state.record_target_guids = {}
+      end
+    end
+
     local chord_name = "(none)"
     if chord_track then
       local _, track_name = reaper.GetTrackName(chord_track)
@@ -659,6 +905,12 @@ local function main()
     end
     if fx_config_errors > 0 then
       status_text = status_text .. " | fx_cfg_err=" .. tostring(fx_config_errors)
+    end
+    if apply_record_timing_offset and timing_changed > 0 then
+      status_text = status_text .. " | timing_shifted=" .. tostring(timing_changed)
+    end
+    if runtime_state.pending_record_flush then
+      status_text = status_text .. " | timing_flush=1"
     end
 
     reaper.SetExtState(MANAGER_SECTION, STATUS_KEY, status_text, false)

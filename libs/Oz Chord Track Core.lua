@@ -1,49 +1,51 @@
 local OzChordTrack = {}
 
-local EXT_SECTION = "OZ_REAPER_CHORD_TRACK"
-local LIVE_SECTION = "OZ_REAPER_CHORD_TRACK_LIVE"
-local LIVE_MODE_KEY = "RUN_MODE"
-local INPUT_MANAGER_SECTION = "OZ_REAPER_CHORD_TRACK_INPUT_MANAGER"
-local INPUT_MANAGER_RUN_TOKEN_KEY = "RUN_TOKEN"
-local INPUT_MANAGER_STATUS_KEY = "STATUS"
-local INPUT_MANAGER_SNAP_MODE_OVERRIDE_KEY = "SNAP_MODE_OVERRIDE"
-local PANEL_SECTION = "OZ_REAPER_CHORD_TRACK_PANEL"
-local CUT_OVERLAPS_AFTER_SNAP_KEY = "CUT_OVERLAPS_AFTER_SNAP"
-local ALLOW_SNAP_INVERSIONS_KEY = "ALLOW_SNAP_INVERSIONS"
-local POPOUT_INITIAL_TAB_KEY = "POPOUT_INITIAL_TAB"
-local POPOUT_WINDOW_X_KEY = "POPOUT_WINDOW_X"
-local POPOUT_WINDOW_Y_KEY = "POPOUT_WINDOW_Y"
-local POPOUT_WINDOW_W_KEY = "POPOUT_WINDOW_W"
-local POPOUT_WINDOW_H_KEY = "POPOUT_WINDOW_H"
-local NEW_NOTE_SNAP_PIPELINE_KEY = "NEW_NOTE_SNAP_PIPELINE"
-local NEW_NOTE_SNAP_MODE_KEY = "NEW_NOTE_SNAP_MODE"
-local TIMELINE_CALIBRATION_PX_KEY = "TIMELINE_CALIBRATION_PX"
-local TIMELINE_CALIBRATION_DEFAULT = 0
-local TIMELINE_CALIBRATION_MIN = -32
-local TIMELINE_CALIBRATION_MAX = 32
-local TIMELINE_CALIBRATION_COARSE_STEP = 1.0
-local TIMELINE_CALIBRATION_FINE_STEP = 0.5
+EXT_SECTION = "OZ_REAPER_CHORD_TRACK"
+LIVE_SECTION = "OZ_REAPER_CHORD_TRACK_LIVE"
+LIVE_MODE_KEY = "RUN_MODE"
+INPUT_MANAGER_SECTION = "OZ_REAPER_CHORD_TRACK_INPUT_MANAGER"
+INPUT_MANAGER_RUN_TOKEN_KEY = "RUN_TOKEN"
+INPUT_MANAGER_STATUS_KEY = "STATUS"
+INPUT_MANAGER_SNAP_MODE_OVERRIDE_KEY = "SNAP_MODE_OVERRIDE"
+PANEL_SECTION = "OZ_REAPER_CHORD_TRACK_PANEL"
+CUT_OVERLAPS_AFTER_SNAP_KEY = "CUT_OVERLAPS_AFTER_SNAP"
+ALLOW_SNAP_INVERSIONS_KEY = "ALLOW_SNAP_INVERSIONS"
+BLOCK_HIGHLIGHT_COLOR_KEY_PREFIX = "BLOCK_HIGHLIGHT_COLOR_RGB_"
+BLOCK_HIGHLIGHT_COLOR_LEGACY_KEY = "BLOCK_HIGHLIGHT_COLOR_RGB"
+POPOUT_INITIAL_TAB_KEY = "POPOUT_INITIAL_TAB"
+POPOUT_WINDOW_X_KEY = "POPOUT_WINDOW_X"
+POPOUT_WINDOW_Y_KEY = "POPOUT_WINDOW_Y"
+POPOUT_WINDOW_W_KEY = "POPOUT_WINDOW_W"
+POPOUT_WINDOW_H_KEY = "POPOUT_WINDOW_H"
+NEW_NOTE_SNAP_PIPELINE_KEY = "NEW_NOTE_SNAP_PIPELINE"
+NEW_NOTE_SNAP_MODE_KEY = "NEW_NOTE_SNAP_MODE"
+TIMELINE_CALIBRATION_PX_KEY = "TIMELINE_CALIBRATION_PX"
+TIMELINE_CALIBRATION_DEFAULT = 0
+TIMELINE_CALIBRATION_MIN = -32
+TIMELINE_CALIBRATION_MAX = 32
+TIMELINE_CALIBRATION_COARSE_STEP = 1.0
+TIMELINE_CALIBRATION_FINE_STEP = 0.5
+RECORD_TIMING_OFFSET = {
+  KEY = "RECORD_TIMING_OFFSET_MS",
+  DEFAULT = 0,
+  MIN = -150,
+  MAX = 150,
+  COARSE_STEP = 5,
+  FINE_STEP = 1,
+}
 
 local CORE_DIR = debug.getinfo(1, "S").source:match("@?(.*[\\/])") or ""
 local SnapSettings = dofile(CORE_DIR .. "Oz Chord Track Snap Settings.lua")
 
-local AUTO_SNAP_ARM_MODE_OFF = "off"
-local AUTO_SNAP_ARM_MODE_CHORDS = "chords"
-local AUTO_SNAP_ARM_MODE_SCALES = "scales"
-local AUTO_SNAP_ARM_MODE_CHORDS_SCALES = "chords_scales"
-local AUTO_SNAP_ARM_MODE_MELODIC_FLOW = "melodic_flow"
-local AUTO_SNAP_ARM_MODE_DEFAULT = AUTO_SNAP_ARM_MODE_OFF
-local AUTO_SNAP_ARM_KEY_PREFIX = "AUTO_SNAP_ARM_MODE_"
+AUTO_SNAP_ARM_MODE_OFF = "off"
+AUTO_SNAP_ARM_MODE_CHORDS = "chords"
+AUTO_SNAP_ARM_MODE_SCALES = "scales"
+AUTO_SNAP_ARM_MODE_CHORDS_SCALES = "chords_scales"
+AUTO_SNAP_ARM_MODE_MELODIC_FLOW = "melodic_flow"
+AUTO_SNAP_ARM_MODE_DEFAULT = AUTO_SNAP_ARM_MODE_OFF
+AUTO_SNAP_ARM_KEY_PREFIX = "AUTO_SNAP_ARM_MODE_"
 
-local AUTO_SNAP_ARM_MODE_ORDER = {
-  AUTO_SNAP_ARM_MODE_OFF,
-  AUTO_SNAP_ARM_MODE_CHORDS,
-  AUTO_SNAP_ARM_MODE_SCALES,
-  AUTO_SNAP_ARM_MODE_CHORDS_SCALES,
-  AUTO_SNAP_ARM_MODE_MELODIC_FLOW,
-}
-
-local AUTO_SNAP_ARM_MODE_LABELS = {
+AUTO_SNAP_ARM_MODE_LABELS = {
   [AUTO_SNAP_ARM_MODE_OFF] = "Off",
   [AUTO_SNAP_ARM_MODE_CHORDS] = "Chords",
   [AUTO_SNAP_ARM_MODE_SCALES] = "Scales",
@@ -51,56 +53,57 @@ local AUTO_SNAP_ARM_MODE_LABELS = {
   [AUTO_SNAP_ARM_MODE_MELODIC_FLOW] = "Melodic Flow",
 }
 
-local AUTO_SNAP_ARM_MODE_TO_SNAP_MODE = {
+AUTO_SNAP_ARM_MODE_TO_SNAP_MODE = {
   [AUTO_SNAP_ARM_MODE_CHORDS] = "chord_only",
   [AUTO_SNAP_ARM_MODE_SCALES] = "scale_only",
   [AUTO_SNAP_ARM_MODE_CHORDS_SCALES] = "chord_scale",
   [AUTO_SNAP_ARM_MODE_MELODIC_FLOW] = "melodic_flow",
 }
 
-local SNAP_MODE_CHORD_ONLY = "chord_only"
-local SNAP_MODE_SCALE_ONLY = "scale_only"
-local SNAP_MODE_CHORD_SCALE = "chord_scale"
-local SNAP_MODE_MELODIC_FLOW = "melodic_flow"
-local SNAP_MODE_DEFAULT = SNAP_MODE_CHORD_SCALE
+SNAP_MODE_CHORD_ONLY = "chord_only"
+SNAP_MODE_SCALE_ONLY = "scale_only"
+SNAP_MODE_CHORD_SCALE = "chord_scale"
+SNAP_MODE_MELODIC_FLOW = "melodic_flow"
+SNAP_MODE_DEFAULT = SNAP_MODE_CHORD_SCALE
 
-local NEW_NOTE_SNAP_PIPELINE_PRE = "pre"
-local NEW_NOTE_SNAP_PIPELINE_POST = "post"
-local NEW_NOTE_SNAP_PIPELINE_DEFAULT = NEW_NOTE_SNAP_PIPELINE_PRE
+NEW_NOTE_SNAP_PIPELINE_PRE = "pre"
+NEW_NOTE_SNAP_PIPELINE_POST = "post"
+NEW_NOTE_SNAP_PIPELINE_DEFAULT = NEW_NOTE_SNAP_PIPELINE_PRE
 
-local SNAP_MODE_LABELS = {
+SNAP_MODE_LABELS = {
   [SNAP_MODE_CHORD_ONLY] = "Chords",
   [SNAP_MODE_SCALE_ONLY] = "Scales",
   [SNAP_MODE_CHORD_SCALE] = "Chords + Scales",
   [SNAP_MODE_MELODIC_FLOW] = "Melodic Flow",
 }
 
-local CHORD_BLOCK_THEME_AUTO = "auto"
-local CHORD_BLOCK_THEME_BLUE = "blue"
-local CHORD_BLOCK_THEME_PURPLE = "purple"
-local CHORD_BLOCK_THEME_NEUTRAL = "neutral"
-local CHORD_BLOCK_THEME_DEFAULT = CHORD_BLOCK_THEME_BLUE
+CHORD_BLOCK_THEME_AUTO = "auto"
+CHORD_BLOCK_THEME_BLUE = "blue"
+CHORD_BLOCK_THEME_PURPLE = "purple"
+CHORD_BLOCK_THEME_NEUTRAL = "neutral"
+CHORD_BLOCK_THEME_DEFAULT = CHORD_BLOCK_THEME_BLUE
 
-local CHORD_BLOCK_THEME_ORDER = {
+CHORD_BLOCK_THEME_ORDER = {
   CHORD_BLOCK_THEME_AUTO,
   CHORD_BLOCK_THEME_BLUE,
   CHORD_BLOCK_THEME_PURPLE,
   CHORD_BLOCK_THEME_NEUTRAL,
 }
 
-local CHORD_BLOCK_THEME_LABELS = {
+CHORD_BLOCK_THEME_LABELS = {
   [CHORD_BLOCK_THEME_AUTO] = "Auto",
   [CHORD_BLOCK_THEME_BLUE] = "Blue",
   [CHORD_BLOCK_THEME_PURPLE] = "Purple",
   [CHORD_BLOCK_THEME_NEUTRAL] = "Neutral",
 }
 
-local INPUT_MANAGER_START_SCRIPT = "libs/Oz Chord Track - Start input snap manager (experimental).lua"
-local INPUT_MANAGER_STOP_SCRIPT = "libs/Oz Chord Track - Stop input snap manager (experimental).lua"
-local INPUT_SNAP_JSFX_RELATIVE_PATH = "Oz Chord Track/Oz Chord Track Input Snap.jsfx"
+INPUT_MANAGER_START_SCRIPT = "libs/Oz Chord Track - Start input snap manager (experimental).lua"
+INPUT_MANAGER_STOP_SCRIPT = "libs/Oz Chord Track - Stop input snap manager (experimental).lua"
+INPUT_SNAP_JSFX_RELATIVE_PATH = "Oz Chord Track/Oz Chord Track Input Snap.jsfx"
 
 local INPUT_SNAP_JSFX_SOURCE = [[desc:Oz Chord Track Input Snap
 options:gmem=OZ_REAPER_CHORD_TRACK_INPUT_SNAP
+// OCT_INPUT_SNAP_MAPPING_V3
 
 slider1:3<0,3,1{Chords,Scales,Chords+Scales,Melodic Flow}>Snap Mode
 slider2:1<0,1,1{Off,On}>Enabled
@@ -118,6 +121,8 @@ GMEM_SCALE_BASE = 24;
 ORDERED = 4096;
 DEGREES = 4128;
 WHITE = 4160;
+CHORD_INTS = 4192;
+SCALE_INTS = 4224;
 
 i = 0;
 loop(2048,
@@ -268,9 +273,55 @@ function melodic_passing_has_pc(pc, use_scale) local(chord_on, scale_on) (
   use_scale ? scale_on : chord_on;
 );
 
-function build_melodic_white_targets(note) local(root_pc, use_scale, offset, pc, ordered_count, degree, third_index, wrapped_index, octave_offset, base_oct) (
+// Returns the semitone offset above root for white-key degree index i (1..6).
+// Uses chord tones first, then diatonic scale, then source union fallback.
+function melodic_get_degree(i, chord_count, scale_count, ordered_count) local(zb, wi, oi) (
+  i < chord_count ? (
+    CHORD_INTS[i]
+  ) : scale_count > 0 ? (
+    zb = i * 2;
+    wi = zb % scale_count;
+    oi = floor(zb / scale_count) * 12;
+    SCALE_INTS[wi] + oi;
+  ) : (
+    zb = i * 2;
+    wi = zb % ordered_count;
+    oi = floor(zb / ordered_count) * 12;
+    ORDERED[wi] + oi;
+  );
+);
+
+function build_melodic_white_targets(note) local(root_pc, use_scale, offset, pc, chord_count, scale_count, ordered_count, base_oct) (
   root_pc = get_chord_root_pc();
   use_scale = gmem[GMEM_SCALE_COUNT] > 0.5;
+
+  chord_count = 0;
+  offset = 0;
+  loop(12,
+    pc = (root_pc + offset) % 12;
+    gmem[GMEM_CHORD_BASE + pc] >= 0.5 ? (
+      CHORD_INTS[chord_count] = offset;
+      chord_count += 1;
+    );
+    offset += 1;
+  );
+  chord_count <= 0 ? (
+    CHORD_INTS[0] = 0;
+    chord_count = 1;
+  );
+
+  scale_count = 0;
+  use_scale ? (
+    offset = 0;
+    loop(12,
+      pc = (root_pc + offset) % 12;
+      gmem[GMEM_SCALE_BASE + pc] >= 0.5 ? (
+        SCALE_INTS[scale_count] = offset;
+        scale_count += 1;
+      );
+      offset += 1;
+    );
+  );
 
   ordered_count = 0;
   offset = 0;
@@ -282,27 +333,27 @@ function build_melodic_white_targets(note) local(root_pc, use_scale, offset, pc,
     );
     offset += 1;
   );
-
   ordered_count <= 0 ? (
     ORDERED[0] = 0;
     ordered_count = 1;
   );
 
-  degree = 0;
-  loop(7,
-    third_index = degree * 2;
-    wrapped_index = third_index % ordered_count;
-    octave_offset = floor(third_index / ordered_count) * 12;
-    DEGREES[degree] = ORDERED[wrapped_index] + octave_offset;
-    degree += 1;
-  );
+  DEGREES[0] = 0;
+  DEGREES[1] = melodic_get_degree(1, chord_count, scale_count, ordered_count);
+  DEGREES[2] = melodic_get_degree(2, chord_count, scale_count, ordered_count);
+  DEGREES[3] = melodic_get_degree(3, chord_count, scale_count, ordered_count);
+  DEGREES[4] = melodic_get_degree(4, chord_count, scale_count, ordered_count);
+  DEGREES[5] = melodic_get_degree(5, chord_count, scale_count, ordered_count);
+  DEGREES[6] = melodic_get_degree(6, chord_count, scale_count, ordered_count);
 
   base_oct = floor(note / 12) * 12;
-  degree = 0;
-  loop(7,
-    WHITE[degree] = base_oct + root_pc + DEGREES[degree];
-    degree += 1;
-  );
+  WHITE[0] = base_oct + root_pc + DEGREES[0];
+  WHITE[1] = base_oct + root_pc + DEGREES[1];
+  WHITE[2] = base_oct + root_pc + DEGREES[2];
+  WHITE[3] = base_oct + root_pc + DEGREES[3];
+  WHITE[4] = base_oct + root_pc + DEGREES[4];
+  WHITE[5] = base_oct + root_pc + DEGREES[5];
+  WHITE[6] = base_oct + root_pc + DEGREES[6];
 );
 
 function melodic_flow_target_unbounded(note) local(pc, white_index, low_pair_index, lower_target, upper_target, candidate, candidate_count, best_note, best_distance, distance, passing_pc, use_scale, low_candidate, high_candidate) (
@@ -350,7 +401,7 @@ function melodic_flow_target_unbounded(note) local(pc, white_index, low_pair_ind
   );
 );
 
-function melodic_flow_target(note, min_note, max_note, bounded) local(target, shifted, candidate, best_note, best_distance, distance) (
+function melodic_flow_target(note, min_note, max_note, bounded) local(target, shifted, candidate, best_note, best_distance, distance, shift_steps) (
   target = melodic_flow_target_unbounded(note);
 
   bounded ? (
@@ -362,8 +413,14 @@ function melodic_flow_target(note, min_note, max_note, bounded) local(target, sh
         best_distance = 999;
 
         shifted = target;
-        while(shifted < min_note, shifted += 12;);
-        while(shifted > max_note, shifted -= 12;);
+        shifted < min_note ? (
+          shift_steps = ceil((min_note - shifted) / 12);
+          shifted += shift_steps * 12;
+        );
+        shifted > max_note ? (
+          shift_steps = ceil((shifted - max_note) / 12);
+          shifted -= shift_steps * 12;
+        );
 
         candidate = shifted;
         (candidate >= min_note && candidate <= max_note) ? (
@@ -509,16 +566,6 @@ local function copy_set(source)
     end
   end
   return target
-end
-
-local function intersect_sets(a, b)
-  local result = {}
-  for pc = 0, 11 do
-    if a[pc] and b[pc] then
-      result[pc] = true
-    end
-  end
-  return result
 end
 
 local function set_count(pitch_set)
@@ -901,6 +948,195 @@ local function chord_block_theme_to_display_label(theme)
   return chord_block_theme_to_label(normalized)
 end
 
+function clamp_color01(value)
+  local numeric = tonumber(value) or 0
+  if numeric < 0 then return 0 end
+  if numeric > 1 then return 1 end
+  return numeric
+end
+
+function clamp_color255(value)
+  local numeric = math.floor((tonumber(value) or 0) + 0.5)
+  if numeric < 0 then return 0 end
+  if numeric > 255 then return 255 end
+  return numeric
+end
+
+function rgb01_to_native_color(r, g, b)
+  local rr = clamp_color255(clamp_color01(r) * 255)
+  local gg = clamp_color255(clamp_color01(g) * 255)
+  local bb = clamp_color255(clamp_color01(b) * 255)
+
+  if reaper.ColorToNative then
+    return reaper.ColorToNative(rr, gg, bb)
+  end
+
+  return rr + (gg * 256) + (bb * 65536)
+end
+
+function parse_block_highlight_color_rgb(stored_value)
+  local text = tostring(stored_value or "")
+  if text == "" then
+    return nil
+  end
+
+  local r, g, b = text:match("^%s*(%-?%d+)%s*,%s*(%-?%d+)%s*,%s*(%-?%d+)%s*$")
+  if not r or not g or not b then
+    return nil
+  end
+
+  return
+    clamp_color255(tonumber(r) or 0),
+    clamp_color255(tonumber(g) or 0),
+    clamp_color255(tonumber(b) or 0)
+end
+
+function block_highlight_theme_scope(theme)
+  local scoped = resolve_chord_block_theme(theme)
+  if scoped ~= CHORD_BLOCK_THEME_BLUE and scoped ~= CHORD_BLOCK_THEME_PURPLE and scoped ~= CHORD_BLOCK_THEME_NEUTRAL then
+    scoped = CHORD_BLOCK_THEME_BLUE
+  end
+  return scoped
+end
+
+function block_highlight_scope_label(theme)
+  return chord_block_theme_to_label(block_highlight_theme_scope(theme))
+end
+
+function block_highlight_color_key_for_theme(theme)
+  local scoped = block_highlight_theme_scope(theme)
+  return BLOCK_HIGHLIGHT_COLOR_KEY_PREFIX .. tostring(scoped):upper(), scoped
+end
+
+function read_block_highlight_override_from_key(key)
+  local stored = reaper.GetExtState(PANEL_SECTION, tostring(key or ""))
+  local r255, g255, b255 = parse_block_highlight_color_rgb(stored)
+  if not r255 then
+    return nil
+  end
+
+  return r255 / 255, g255 / 255, b255 / 255
+end
+
+function write_block_highlight_override_to_key(key, r, g, b)
+  local r255 = clamp_color255(clamp_color01(r) * 255)
+  local g255 = clamp_color255(clamp_color01(g) * 255)
+  local b255 = clamp_color255(clamp_color01(b) * 255)
+  reaper.SetExtState(PANEL_SECTION, tostring(key or ""), string.format("%d,%d,%d", r255, g255, b255), true)
+  return r255 / 255, g255 / 255, b255 / 255
+end
+
+function delete_panel_ext_state_key(key)
+  local key_name = tostring(key or "")
+  if key_name == "" then
+    return
+  end
+
+  if reaper.DeleteExtState then
+    reaper.DeleteExtState(PANEL_SECTION, key_name, true)
+  else
+    reaper.SetExtState(PANEL_SECTION, key_name, "", true)
+  end
+end
+
+function get_block_highlight_override_rgb01(theme)
+  local theme_key = block_highlight_color_key_for_theme(theme)
+  local theme_r, theme_g, theme_b = read_block_highlight_override_from_key(theme_key)
+  if theme_r ~= nil then
+    return theme_r, theme_g, theme_b
+  end
+
+  local legacy_r, legacy_g, legacy_b = read_block_highlight_override_from_key(BLOCK_HIGHLIGHT_COLOR_LEGACY_KEY)
+  if legacy_r ~= nil then
+    write_block_highlight_override_to_key(theme_key, legacy_r, legacy_g, legacy_b)
+    delete_panel_ext_state_key(BLOCK_HIGHLIGHT_COLOR_LEGACY_KEY)
+    return legacy_r, legacy_g, legacy_b
+  end
+
+  return nil
+end
+
+function set_block_highlight_override_rgb01(theme, r, g, b)
+  local theme_key, scoped = block_highlight_color_key_for_theme(theme)
+  local saved_r, saved_g, saved_b = write_block_highlight_override_to_key(theme_key, r, g, b)
+  delete_panel_ext_state_key(BLOCK_HIGHLIGHT_COLOR_LEGACY_KEY)
+  return saved_r, saved_g, saved_b, scoped
+end
+
+function clear_block_highlight_override(theme)
+  local theme_key = block_highlight_color_key_for_theme(theme)
+  delete_panel_ext_state_key(theme_key)
+  delete_panel_ext_state_key(BLOCK_HIGHLIGHT_COLOR_LEGACY_KEY)
+end
+
+function desaturate_color_rgb01(r, g, b, amount)
+  local gray = (r * 0.299) + (g * 0.587) + (b * 0.114)
+  local mix = clamp_color01(amount)
+  return
+    (r * (1 - mix)) + (gray * mix),
+    (g * (1 - mix)) + (gray * mix),
+    (b * (1 - mix)) + (gray * mix)
+end
+
+function theme_default_highlight_rgb01(theme)
+  local accent_r, accent_g, accent_b = 0.35, 0.62, 0.90
+  local normalized_theme = resolve_chord_block_theme(theme)
+
+  if normalized_theme == CHORD_BLOCK_THEME_PURPLE then
+    accent_r = clamp_color01(accent_r + 0.12)
+    accent_g = clamp_color01(accent_g - 0.04)
+    accent_b = clamp_color01(accent_b + 0.08)
+  elseif normalized_theme == CHORD_BLOCK_THEME_NEUTRAL then
+    accent_r, accent_g, accent_b = desaturate_color_rgb01(accent_r, accent_g, accent_b, 0.70)
+    accent_r = clamp_color01(accent_r + 0.03)
+    accent_g = clamp_color01(accent_g + 0.03)
+    accent_b = clamp_color01(accent_b + 0.04)
+  end
+
+  return accent_r, accent_g, accent_b
+end
+
+function resolve_block_highlight_preview_rgb01(theme)
+  local scoped_theme = block_highlight_theme_scope(theme)
+  local override_r, override_g, override_b = get_block_highlight_override_rgb01(scoped_theme)
+  if override_r ~= nil then
+    return override_r, override_g, override_b, true, scoped_theme
+  end
+
+  local default_r, default_g, default_b = theme_default_highlight_rgb01(scoped_theme)
+  return default_r, default_g, default_b, false, scoped_theme
+end
+
+function block_highlight_color_to_hex(r, g, b)
+  local rr = clamp_color255(clamp_color01(r) * 255)
+  local gg = clamp_color255(clamp_color01(g) * 255)
+  local bb = clamp_color255(clamp_color01(b) * 255)
+  return string.format("#%02X%02X%02X", rr, gg, bb)
+end
+
+function segmented_selected_style_for_theme(theme)
+  local fill_r, fill_g, fill_b = resolve_block_highlight_preview_rgb01(theme)
+  local luminance = (fill_r * 0.2126) + (fill_g * 0.7152) + (fill_b * 0.0722)
+  local text_gray = (luminance >= 0.56) and 0.08 or 0.96
+  return fill_r, fill_g, fill_b, text_gray
+end
+
+function choose_block_highlight_color(initial_r, initial_g, initial_b)
+  if not reaper.GR_SelectColor then
+    return nil, nil, nil, false
+  end
+
+  local hwnd = (reaper.GetMainHwnd and reaper.GetMainHwnd()) or 0
+  local init_native = rgb01_to_native_color(initial_r, initial_g, initial_b)
+  local ok, selected_native = reaper.GR_SelectColor(hwnd, init_native)
+  if not ok or ok == 0 then
+    return nil, nil, nil, false
+  end
+
+  local r, g, b = native_color_to_rgb01(selected_native or init_native)
+  return clamp_color01(r), clamp_color01(g), clamp_color01(b), true
+end
+
 local function auto_snap_arm_mode_keys_from_guid(guid)
   if not guid or guid == "" then return nil end
   local safe_guid = guid:gsub("[^%w]", "_")
@@ -1060,6 +1296,117 @@ local function show_timeline_calibration_menu(x, y, current_value)
 
   if mode_result == 3 then
     return TIMELINE_CALIBRATION_DEFAULT
+  end
+
+  return nil
+end
+
+function clamp_record_timing_offset_ms(value)
+  local numeric = tonumber(value) or RECORD_TIMING_OFFSET.DEFAULT
+  if numeric < RECORD_TIMING_OFFSET.MIN then
+    numeric = RECORD_TIMING_OFFSET.MIN
+  elseif numeric > RECORD_TIMING_OFFSET.MAX then
+    numeric = RECORD_TIMING_OFFSET.MAX
+  end
+
+  numeric = round_to_step(numeric, RECORD_TIMING_OFFSET.FINE_STEP)
+  if numeric < RECORD_TIMING_OFFSET.MIN then
+    numeric = RECORD_TIMING_OFFSET.MIN
+  elseif numeric > RECORD_TIMING_OFFSET.MAX then
+    numeric = RECORD_TIMING_OFFSET.MAX
+  end
+
+  if math.abs(numeric) < 0.0001 then
+    numeric = 0
+  end
+
+  return numeric
+end
+
+function record_timing_offset_ms_to_label(value)
+  local ms = clamp_record_timing_offset_ms(value)
+  local rounded_int = round_half_away_from_zero(ms)
+  local text_value = ""
+  if math.abs(ms - rounded_int) < 0.0001 then
+    text_value = tostring(rounded_int)
+  else
+    text_value = string.format("%.1f", ms)
+    text_value = text_value:gsub("%.0$", "")
+  end
+
+  if ms > 0 then
+    return "+" .. text_value .. " ms"
+  end
+
+  return text_value .. " ms"
+end
+
+function get_record_timing_offset_ms()
+  local _, stored = reaper.GetProjExtState(0, EXT_SECTION, RECORD_TIMING_OFFSET.KEY)
+  if not stored or stored == "" then
+    return RECORD_TIMING_OFFSET.DEFAULT
+  end
+
+  return clamp_record_timing_offset_ms(stored)
+end
+
+function set_record_timing_offset_ms(value)
+  local ms = clamp_record_timing_offset_ms(value)
+  reaper.SetProjExtState(0, EXT_SECTION, RECORD_TIMING_OFFSET.KEY, tostring(ms))
+  return ms
+end
+
+function show_record_timing_offset_values_menu(x, y, current_value, step)
+  gfx.x = x
+  gfx.y = y
+
+  local current = clamp_record_timing_offset_ms(current_value)
+  local values = {}
+  local menu_items = {}
+  local value = RECORD_TIMING_OFFSET.MIN
+  local menu_step = math.max(RECORD_TIMING_OFFSET.FINE_STEP, tonumber(step) or RECORD_TIMING_OFFSET.FINE_STEP)
+  local epsilon = menu_step * 0.25
+
+  while value <= (RECORD_TIMING_OFFSET.MAX + epsilon) do
+    local normalized = clamp_record_timing_offset_ms(value)
+    values[#values + 1] = normalized
+
+    local label = record_timing_offset_ms_to_label(normalized)
+    if math.abs(normalized - current) < 0.0001 then
+      label = "!" .. label
+    end
+    menu_items[#menu_items + 1] = label
+
+    value = value + menu_step
+  end
+
+  local menu_result = gfx.showmenu(table.concat(menu_items, "|"))
+  if menu_result <= 0 then
+    return nil
+  end
+
+  return values[menu_result]
+end
+
+function show_record_timing_offset_menu(x, y, current_value)
+  gfx.x = x
+  gfx.y = y
+
+  local mode_result = gfx.showmenu("Coarse (5 ms)|Fine (1 ms)|Reset to 0 ms")
+  if mode_result <= 0 then
+    return nil
+  end
+
+  if mode_result == 1 then
+    return show_record_timing_offset_values_menu(x, y, current_value, RECORD_TIMING_OFFSET.COARSE_STEP)
+  end
+
+  if mode_result == 2 then
+    return show_record_timing_offset_values_menu(x, y, current_value, RECORD_TIMING_OFFSET.FINE_STEP)
+  end
+
+  if mode_result == 3 then
+    return RECORD_TIMING_OFFSET.DEFAULT
   end
 
   return nil
@@ -1871,24 +2218,57 @@ local function melodic_flow_pitch(original_pitch, chord_set, scale_set, chord_ro
   end
   local passing_set = scale_count > 0 and scale_set or source_set
 
-  local ordered_intervals = {}
+  local source_intervals = {}
+  local scale_intervals = {}
+  local chord_intervals = {}
+
   for offset = 0, 11 do
     local pc = (root_pc + offset) % 12
     if source_set[pc] then
-      ordered_intervals[#ordered_intervals + 1] = offset
+      source_intervals[#source_intervals + 1] = offset
+    end
+    if scale_set[pc] then
+      scale_intervals[#scale_intervals + 1] = offset
+    end
+    if chord_set[pc] then
+      chord_intervals[#chord_intervals + 1] = offset
     end
   end
-  if #ordered_intervals == 0 then
+
+  if #source_intervals == 0 then
     return nil
   end
 
-  local degree_offsets = {}
-  for i = 1, 7 do
-    local third_index = (i - 1) * 2
-    local wrapped_index = (third_index % #ordered_intervals) + 1
-    local octave_offset = math.floor(third_index / #ordered_intervals) * 12
-    degree_offsets[i] = ordered_intervals[wrapped_index] + octave_offset
+  local function odd_stack_offset(index)
+    local third_index = (index - 1) * 2
+    local wrapped_index = (third_index % #source_intervals) + 1
+    local octave_offset = math.floor(third_index / #source_intervals) * 12
+    return source_intervals[wrapped_index] + octave_offset
   end
+
+  local function diatonic_degree_offset(degree)
+    if #scale_intervals == 0 then
+      return nil
+    end
+
+    local zero_based = degree - 1
+    local wrapped_index = (zero_based % #scale_intervals) + 1
+    local octave_offset = math.floor(zero_based / #scale_intervals) * 12
+    return scale_intervals[wrapped_index] + octave_offset
+  end
+
+  local degree_offsets = {}
+  degree_offsets[1] = 0
+
+  for i = 2, 4 do
+    local from_chord = chord_intervals[i]
+    local desired_degree = (i * 2) - 1
+    degree_offsets[i] = from_chord or diatonic_degree_offset(desired_degree) or odd_stack_offset(i)
+  end
+
+  degree_offsets[5] = diatonic_degree_offset(9) or odd_stack_offset(5)
+  degree_offsets[6] = diatonic_degree_offset(11) or odd_stack_offset(6)
+  degree_offsets[7] = diatonic_degree_offset(13) or odd_stack_offset(7)
 
   local function clamp_midi_pitch(pitch)
     if pitch < 0 then return 0 end
@@ -2092,6 +2472,8 @@ local function snap_take_notes(take, chord_notes, scale_set, mode, start_note_in
   local changed = 0
   local processed = 0
   local allow_inversions = SnapSettings.get_proj_bool(0, EXT_SECTION, ALLOW_SNAP_INVERSIONS_KEY, false)
+  local normalized_mode = normalize_snap_mode(mode)
+  local enforce_non_inverted = not allow_inversions
   local current_group_start_ppq = nil
   local current_group_channel = nil
   local last_group_snapped_pitch = nil
@@ -2099,7 +2481,7 @@ local function snap_take_notes(take, chord_notes, scale_set, mode, start_note_in
   for note_index = from_index, note_count - 1 do
     local ok, selected, muted, start_ppq, end_ppq, channel, pitch, velocity = reaper.MIDI_GetNote(take, note_index)
     if ok and not muted and (not selected_only or selected) then
-      if (not allow_inversions) and (current_group_start_ppq ~= start_ppq or current_group_channel ~= channel) then
+      if enforce_non_inverted and (current_group_start_ppq ~= start_ppq or current_group_channel ~= channel) then
         current_group_start_ppq = start_ppq
         current_group_channel = channel
         last_group_snapped_pitch = nil
@@ -2110,14 +2492,14 @@ local function snap_take_notes(take, chord_notes, scale_set, mode, start_note_in
       local allowed_set = build_allowed_set(mode, chord_set, chord_count, scale_set)
       if set_count(allowed_set) > 0 then
         local snapped_pitch = nil
-        if normalize_snap_mode(mode) == SNAP_MODE_MELODIC_FLOW then
+        if normalized_mode == SNAP_MODE_MELODIC_FLOW then
           snapped_pitch = melodic_flow_pitch(pitch, chord_set, scale_set, chord_root_pc)
         end
         if snapped_pitch == nil then
           snapped_pitch = nearest_pitch(pitch, allowed_set)
         end
 
-        if (not allow_inversions) and last_group_snapped_pitch ~= nil and snapped_pitch < last_group_snapped_pitch then
+        if enforce_non_inverted and last_group_snapped_pitch ~= nil and snapped_pitch < last_group_snapped_pitch then
           local floor_pitch = math.max(0, math.floor(last_group_snapped_pitch))
           local non_inverted = nil
           local best_distance = math.huge
@@ -2135,7 +2517,7 @@ local function snap_take_notes(take, chord_notes, scale_set, mode, start_note_in
           end
         end
 
-        if (not allow_inversions) then
+        if enforce_non_inverted then
           last_group_snapped_pitch = snapped_pitch
         end
 
@@ -2150,6 +2532,64 @@ local function snap_take_notes(take, chord_notes, scale_set, mode, start_note_in
 
   if cut_overlaps then
     changed = changed + truncate_overlapping_notes_in_take(take)
+  end
+
+  if changed > 0 then
+    reaper.MIDI_Sort(take)
+  end
+
+  return changed, processed, note_count
+end
+
+function shift_take_note_timing(take, start_note_index, offset_ms)
+  local _, note_count = reaper.MIDI_CountEvts(take)
+  if note_count == 0 then return 0, 0, note_count end
+
+  local offset = tonumber(offset_ms) or 0
+  if math.abs(offset) < 0.0001 then
+    return 0, 0, note_count
+  end
+
+  local from_index = start_note_index or 0
+  if from_index < 0 then from_index = 0 end
+  if from_index >= note_count then return 0, 0, note_count end
+
+  local offset_seconds = offset / 1000.0
+  local changed = 0
+  local processed = 0
+
+  for note_index = from_index, note_count - 1 do
+    local ok, selected, muted, start_ppq, end_ppq, channel, pitch, velocity = reaper.MIDI_GetNote(take, note_index)
+    if ok and not muted then
+      local start_time = reaper.MIDI_GetProjTimeFromPPQPos(take, start_ppq)
+      local end_time = reaper.MIDI_GetProjTimeFromPPQPos(take, end_ppq)
+
+      local new_start_time = start_time + offset_seconds
+      local new_end_time = end_time + offset_seconds
+
+      if new_start_time < 0 then
+        local compensation = -new_start_time
+        new_start_time = 0
+        new_end_time = new_end_time + compensation
+      end
+
+      if new_end_time <= new_start_time then
+        new_end_time = new_start_time + 0.001
+      end
+
+      local new_start_ppq = reaper.MIDI_GetPPQPosFromProjTime(take, new_start_time)
+      local new_end_ppq = reaper.MIDI_GetPPQPosFromProjTime(take, new_end_time)
+      if new_end_ppq <= new_start_ppq then
+        new_end_ppq = new_start_ppq + 1
+      end
+
+      if math.abs(new_start_ppq - start_ppq) > 0.0001 or math.abs(new_end_ppq - end_ppq) > 0.0001 then
+        reaper.MIDI_SetNote(take, note_index, selected, muted, new_start_ppq, new_end_ppq, channel, pitch, velocity, true)
+        changed = changed + 1
+      end
+
+      processed = processed + 1
+    end
   end
 
   if changed > 0 then
@@ -2401,6 +2841,10 @@ end
 
 local function format_timeline_calibration_status(px)
   return "Timeline alignment offset set to " .. timeline_calibration_to_label(px) .. "."
+end
+
+function format_record_timing_offset_status(ms)
+  return "Record timing offset set to " .. record_timing_offset_ms_to_label(ms) .. "."
 end
 
 function OzChordTrack.set_selected_track_as_chord_track()
@@ -3058,6 +3502,7 @@ live_state = {
   token = nil,
   mode = nil,
   take_note_counts = {},
+  take_timing_counts = {},
   chord_notes = {},
   last_refresh = 0,
   last_play_position = nil,
@@ -3083,6 +3528,8 @@ local function live_loop()
   local is_recording = (play_state & 4) == 4
   local was_recording = live_state.was_recording == true
   local should_flush_after_record = false
+  local record_timing_offset_ms = get_record_timing_offset_ms()
+  local apply_record_timing_offset = math.abs(record_timing_offset_ms) >= 0.0001
 
   if is_recording then
     live_state.was_recording = true
@@ -3141,6 +3588,7 @@ local function live_loop()
   if tonumber(play_position) and tonumber(live_state.last_play_position) then
     if play_position < (live_state.last_play_position - 0.05) then
       live_state.take_note_counts = {}
+      live_state.take_timing_counts = {}
     end
   end
   live_state.last_play_position = play_position
@@ -3189,7 +3637,20 @@ local function live_loop()
       processed_total = processed_total + (tonumber(rescue_processed) or 0)
     end
 
+    local timing_last_count = tonumber(live_state.take_timing_counts[id])
+    if timing_last_count == nil then
+      timing_last_count = current_count
+    end
+
+    if apply_record_timing_offset then
+      local timing_changed, timing_processed, timing_count = shift_take_note_timing(take, timing_last_count, record_timing_offset_ms)
+      changed = changed + (tonumber(timing_changed) or 0)
+      processed = processed + (tonumber(timing_processed) or 0)
+      current_count = timing_count
+    end
+
     live_state.take_note_counts[id] = current_count
+    live_state.take_timing_counts[id] = current_count
     changed_total = changed_total + (tonumber(changed) or 0)
     processed_total = processed_total + (tonumber(processed) or 0)
 
@@ -3204,7 +3665,26 @@ local function live_loop()
       local track = find_track_by_guid(guid)
       if track and track ~= chord_track then
         for_each_midi_take_on_track(track, function(take)
-          local changed, processed = snap_take_notes(take, live_state.chord_notes, state.scale_pcs, snap_mode, 0, false)
+          local id = take_id(take)
+          seen_take_ids[id] = true
+
+          local changed, processed, current_count = snap_take_notes(take, live_state.chord_notes, state.scale_pcs, snap_mode, 0, false)
+
+          local timing_last_count = tonumber(live_state.take_timing_counts[id])
+          if timing_last_count == nil then
+            timing_last_count = current_count
+          end
+
+          if apply_record_timing_offset then
+            local timing_changed, timing_processed, timing_count = shift_take_note_timing(take, timing_last_count, record_timing_offset_ms)
+            changed = changed + (tonumber(timing_changed) or 0)
+            processed = processed + (tonumber(timing_processed) or 0)
+            current_count = timing_count
+          end
+
+          live_state.take_note_counts[id] = current_count
+          live_state.take_timing_counts[id] = current_count
+
           changed_total = changed_total + (tonumber(changed) or 0)
           processed_total = processed_total + (tonumber(processed) or 0)
           if (tonumber(changed) or 0) > 0 then
@@ -3218,6 +3698,12 @@ local function live_loop()
   for id in pairs(live_state.take_note_counts) do
     if not seen_take_ids[id] then
       live_state.take_note_counts[id] = nil
+    end
+  end
+
+  for id in pairs(live_state.take_timing_counts) do
+    if not seen_take_ids[id] then
+      live_state.take_timing_counts[id] = nil
     end
   end
 
@@ -3280,6 +3766,7 @@ local function start_live_snap_internal(mode)
   live_state.token = tostring(reaper.time_precise())
   live_state.mode = live_mode
   live_state.take_note_counts = {}
+  live_state.take_timing_counts = {}
   live_state.chord_notes = gather_chord_notes(chord_track)
   live_state.last_refresh = 0
   live_state.last_play_position = nil
@@ -3490,6 +3977,11 @@ local function is_legacy_input_snap_jsfx(path)
     return true
   end
 
+  -- Reinstall when Melodic Flow mapping schema changes.
+  if content:find("OCT_INPUT_SNAP_MAPPING_V3", 1, true) == nil then
+    return true
+  end
+
   return false
 end
 
@@ -3623,6 +4115,7 @@ function OzChordTrack.run_dockable_panel()
   local stored_compact_mode = reaper.GetExtState(PANEL_SECTION, "COMPACT_MODE") == "1"
   local stored_cut_overlaps = get_cut_overlaps_after_snap_enabled()
   local stored_timeline_calibration = get_timeline_calibration_px()
+  local stored_record_timing_offset = get_record_timing_offset_ms()
 
   gfx.init("Chord Track", 680, 980, dock_state, 150, 120)
 
@@ -3640,6 +4133,7 @@ function OzChordTrack.run_dockable_panel()
     cut_overlaps_after_snap = stored_cut_overlaps,
     allow_snap_inversions = SnapSettings.get_proj_bool(0, EXT_SECTION, ALLOW_SNAP_INVERSIONS_KEY, false),
     timeline_calibration_px = stored_timeline_calibration,
+    record_timing_offset_ms = stored_record_timing_offset,
     new_note_snap_pipeline_mode = get_new_note_snap_pipeline_mode(),
     new_note_snap_mode = get_new_note_snap_mode(),
     active_tab = "home",
@@ -3691,6 +4185,16 @@ function OzChordTrack.run_dockable_panel()
 
     ui_state.timeline_calibration_px = set_timeline_calibration_px(selected_px)
     set_status(format_timeline_calibration_status(ui_state.timeline_calibration_px))
+  end
+
+  local function apply_record_timing_offset_menu(x, y)
+    local selected_ms = show_record_timing_offset_menu(x, y, ui_state.record_timing_offset_ms)
+    if selected_ms == nil then
+      return
+    end
+
+    ui_state.record_timing_offset_ms = set_record_timing_offset_ms(selected_ms)
+    set_status(format_record_timing_offset_status(ui_state.record_timing_offset_ms))
   end
 
   local function apply_snap_selected_midi_menu(x, y)
@@ -4051,7 +4555,7 @@ function OzChordTrack.run_dockable_panel()
       (b * (1 - mix)) + (gray * mix)
   end
 
-  local function block_style_for_quality(quality, hovered, theme)
+  local function block_style_for_quality(quality, hovered, theme, highlight_override_r, highlight_override_g, highlight_override_b)
     local body_r, body_g, body_b = 0.16, 0.30, 0.45
     local accent_r, accent_g, accent_b = 0.35, 0.62, 0.90
     local badge_r, badge_g, badge_b = 0.25, 0.42, 0.62
@@ -4108,6 +4612,12 @@ function OzChordTrack.run_dockable_panel()
         clamp01(accent_r + 0.03),
         clamp01(accent_g + 0.03),
         clamp01(accent_b + 0.04)
+    end
+
+    if highlight_override_r ~= nil then
+      accent_r = clamp01(highlight_override_r)
+      accent_g = clamp01(highlight_override_g)
+      accent_b = clamp01(highlight_override_b)
     end
 
     local hover_boost = hovered and 0.08 or 0
@@ -4213,6 +4723,7 @@ function OzChordTrack.run_dockable_panel()
     gfx.setfont(1, "Segoe UI", 12)
     gfx.set(0.70, 0.72, 0.78, 1)
     local active_theme = resolve_chord_block_theme(ui_state.block_theme)
+    local highlight_override_r, highlight_override_g, highlight_override_b = get_block_highlight_override_rgb01(active_theme)
     local blocks_summary = tostring(#ui_state.chord_blocks) .. " blocks | " .. chord_block_theme_to_display_label(ui_state.block_theme)
     local summary_w = gfx.measurestr(blocks_summary)
     gfx.x = x + w - summary_w - 10
@@ -4357,7 +4868,7 @@ function OzChordTrack.run_dockable_panel()
           hovered_block = block
         end
 
-        local style = block_style_for_quality(block.quality, is_hovered, active_theme)
+        local style = block_style_for_quality(block.quality, is_hovered, active_theme, highlight_override_r, highlight_override_g, highlight_override_b)
 
         local block_pad = math.max(3, math.floor(math.min(bw, bh) * 0.08))
         local accent_h = math.max(3, math.min(7, math.floor(bh * 0.12)))
@@ -4512,7 +5023,9 @@ function OzChordTrack.run_dockable_panel()
     local current_state = load_state()
     ui_state.cut_overlaps_after_snap = get_cut_overlaps_after_snap_enabled()
     ui_state.allow_snap_inversions = SnapSettings.get_proj_bool(0, EXT_SECTION, ALLOW_SNAP_INVERSIONS_KEY, false)
+    ui_state.block_theme = normalize_chord_block_theme(reaper.GetExtState(PANEL_SECTION, "BLOCK_THEME"))
     ui_state.timeline_calibration_px = get_timeline_calibration_px()
+    ui_state.record_timing_offset_ms = get_record_timing_offset_ms()
     ui_state.new_note_snap_pipeline_mode = get_new_note_snap_pipeline_mode()
     ui_state.new_note_snap_mode = get_new_note_snap_mode()
     local chord_track = find_track_by_guid(current_state.track_guid)
@@ -4839,6 +5352,199 @@ function OzChordTrack.run_dockable_panel()
         end)
       end
 
+      local function segmented_option_row(options, selected_id, on_select)
+        row(density.button_h + density.button_row_gap, function(draw_y)
+          local count = #options
+          if count <= 0 then
+            return
+          end
+
+          local selected_r, selected_g, selected_b, selected_text_gray = segmented_selected_style_for_theme(ui_state.block_theme)
+
+          local total_w = area_w - 16
+          local segment_w = math.floor(total_w / count)
+          local last_extra = total_w - (segment_w * count)
+          local draw_x = area_x + 8
+          local can_click_row = allow_click and do_draw and point_in_rect(gfx.mouse_x, gfx.mouse_y, area_x, area_y, area_w, area_h)
+
+          for i = 1, count do
+            local option = options[i]
+            local this_w = segment_w
+            if i == count then
+              this_w = this_w + last_extra
+            end
+
+            local hovered = can_click_row and point_in_rect(gfx.mouse_x, gfx.mouse_y, draw_x, draw_y, this_w, density.button_h)
+            local selected = option.id == selected_id
+
+            if selected then
+              gfx.set(selected_r, selected_g, selected_b, 1)
+            elseif hovered then
+              gfx.set(0.28, 0.28, 0.30, 1)
+            else
+              gfx.set(0.21, 0.21, 0.23, 1)
+            end
+            gfx.rect(draw_x, draw_y, this_w, density.button_h, 1)
+
+            gfx.set(0.10, 0.10, 0.10, 1)
+            gfx.rect(draw_x, draw_y, this_w, density.button_h, 0)
+
+            gfx.setfont(1, "Segoe UI", density.button_font)
+            local text_color = selected and selected_text_gray or 0.92
+            gfx.set(text_color, text_color, text_color, 1)
+            local display_label = fit_text_to_width(option.label, this_w - 8, density.button_font)
+            local text_w, text_h = gfx.measurestr(display_label)
+            gfx.x = draw_x + math.max(4, (this_w - text_w) * 0.5)
+            gfx.y = draw_y + math.max(2, (density.button_h - text_h) * 0.5)
+            gfx.drawstr(display_label)
+
+            if hovered and can_click_row and click then
+              on_select(option.id)
+            end
+
+            draw_x = draw_x + this_w
+          end
+        end)
+      end
+
+      local function color_swatch_row(text, swatch_r, swatch_g, swatch_b, callback)
+        row(density.button_h + density.button_row_gap, function(draw_y)
+          local row_x = area_x + 8
+          local row_w = area_w - 16
+          local can_click = allow_click and do_draw and point_in_rect(gfx.mouse_x, gfx.mouse_y, area_x, area_y, area_w, area_h)
+          local hovered = can_click and point_in_rect(gfx.mouse_x, gfx.mouse_y, row_x, draw_y, row_w, density.button_h)
+
+          if hovered then
+            gfx.set(0.28, 0.28, 0.30, 1)
+          else
+            gfx.set(0.21, 0.21, 0.23, 1)
+          end
+          gfx.rect(row_x, draw_y, row_w, density.button_h, 1)
+
+          gfx.set(0.10, 0.10, 0.10, 1)
+          gfx.rect(row_x, draw_y, row_w, density.button_h, 0)
+
+          local swatch_h = math.max(12, density.button_h - 8)
+          local swatch_w = math.max(22, math.floor(swatch_h * 1.9))
+          local swatch_x = row_x + 6
+          local swatch_y = draw_y + math.floor((density.button_h - swatch_h) * 0.5)
+
+          gfx.set(clamp01(swatch_r), clamp01(swatch_g), clamp01(swatch_b), 1)
+          gfx.rect(swatch_x, swatch_y, swatch_w, swatch_h, 1)
+          gfx.set(0.08, 0.08, 0.09, 1)
+          gfx.rect(swatch_x, swatch_y, swatch_w, swatch_h, 0)
+
+          gfx.setfont(1, "Segoe UI", density.button_font)
+          gfx.set(0.92, 0.92, 0.94, 1)
+          local display = fit_text_to_width(text, row_w - swatch_w - 20, density.button_font)
+          local _, text_h = gfx.measurestr(display)
+          gfx.x = swatch_x + swatch_w + 8
+          gfx.y = draw_y + math.max(2, (density.button_h - text_h) * 0.5)
+          gfx.drawstr(display)
+
+          if hovered and can_click and click then
+            callback()
+          end
+        end)
+      end
+
+      local function toggle_switch_row(text, state, callback)
+        row(density.button_h + density.button_row_gap, function(draw_y)
+          local row_x = area_x + 8
+          local row_w = area_w - 16
+          local row_h = density.button_h
+          local can_click = allow_click and do_draw and point_in_rect(gfx.mouse_x, gfx.mouse_y, area_x, area_y, area_w, area_h)
+          local hovered = can_click and point_in_rect(gfx.mouse_x, gfx.mouse_y, row_x, draw_y, row_w, row_h)
+          local selected_r, selected_g, selected_b = segmented_selected_style_for_theme(ui_state.block_theme)
+
+          if hovered then
+            gfx.set(0.28, 0.28, 0.30, 1)
+          else
+            gfx.set(0.21, 0.21, 0.23, 1)
+          end
+          gfx.rect(row_x, draw_y, row_w, row_h, 1)
+
+          gfx.set(0.10, 0.10, 0.10, 1)
+          gfx.rect(row_x, draw_y, row_w, row_h, 0)
+
+          local switch_h = math.max(14, row_h - 8)
+          local switch_w = math.max(40, math.floor(switch_h * 1.95))
+          local switch_x = row_x + row_w - switch_w - 8
+          local switch_y = draw_y + math.floor((row_h - switch_h) * 0.5)
+
+          local is_on = state == "on"
+          local is_mixed = state == "mixed"
+
+          local track_r, track_g, track_b = 0.33, 0.33, 0.36
+          if is_on then
+            track_r = clamp_color01((selected_r * 0.45) + 0.12)
+            track_g = clamp_color01((selected_g * 0.45) + 0.12)
+            track_b = clamp_color01((selected_b * 0.45) + 0.12)
+          elseif is_mixed then
+            track_r = clamp_color01((selected_r * 0.30) + 0.16)
+            track_g = clamp_color01((selected_g * 0.30) + 0.16)
+            track_b = clamp_color01((selected_b * 0.30) + 0.16)
+          end
+          if hovered then
+            track_r = clamp_color01(track_r + 0.05)
+            track_g = clamp_color01(track_g + 0.05)
+            track_b = clamp_color01(track_b + 0.05)
+          end
+
+          gfx.set(track_r, track_g, track_b, 1)
+          gfx.rect(switch_x, switch_y, switch_w, switch_h, 1)
+          gfx.set(0.09, 0.09, 0.10, 1)
+          gfx.rect(switch_x, switch_y, switch_w, switch_h, 0)
+
+          local knob_d = math.max(10, switch_h - 4)
+          local knob_range = switch_w - knob_d - 4
+          local knob_t = 0
+          if is_on then
+            knob_t = 1
+          elseif is_mixed then
+            knob_t = 0.5
+          end
+          local knob_x = switch_x + 2 + (knob_range * knob_t)
+          local knob_y = switch_y + 2
+
+          gfx.set(0.90, 0.90, 0.92, 1)
+          gfx.rect(knob_x, knob_y, knob_d, knob_d, 1)
+          gfx.set(0.14, 0.14, 0.16, 1)
+          gfx.rect(knob_x, knob_y, knob_d, knob_d, 0)
+
+          local state_text = "OFF"
+          local state_r, state_g, state_b = 0.70, 0.70, 0.74
+          if is_on then
+            state_text = "ON"
+            state_r, state_g, state_b = selected_r, selected_g, selected_b
+          elseif is_mixed then
+            state_text = "MIX"
+            state_r, state_g, state_b = selected_r, selected_g, selected_b
+          end
+
+          gfx.setfont(1, "Segoe UI", math.max(10, density.button_font - 1))
+          gfx.set(state_r, state_g, state_b, 1)
+          local state_w, state_h = gfx.measurestr(state_text)
+          local state_x = switch_x - state_w - 8
+          gfx.x = state_x
+          gfx.y = draw_y + math.max(2, (row_h - state_h) * 0.5)
+          gfx.drawstr(state_text)
+
+          gfx.setfont(1, "Segoe UI", density.button_font)
+          gfx.set(0.92, 0.92, 0.94, 1)
+          local label_max_w = math.max(20, (state_x - row_x) - 10)
+          local display = fit_text_to_width(text, label_max_w, density.button_font)
+          local _, text_h = gfx.measurestr(display)
+          gfx.x = row_x + 8
+          gfx.y = draw_y + math.max(2, (row_h - text_h) * 0.5)
+          gfx.drawstr(display)
+
+          if hovered and can_click and click then
+            callback()
+          end
+        end)
+      end
+
       if target_tab == "home" then
         local selected_follow_modes_text, selected_follow_has_multiple_modes, selected_follow_target_count = selected_follow_modes_summary()
         local selected_follow_section_title = (selected_follow_target_count > 1) and "Selected Tracks Follow" or "Selected Track Follow"
@@ -5012,7 +5718,7 @@ function OzChordTrack.run_dockable_panel()
         if pipeline_mode == NEW_NOTE_SNAP_PIPELINE_PRE then
           local manager_running, manager_status = get_input_manager_runtime_status()
           runtime_running = manager_running
-          runtime_label = manager_running and "[x] Pre Snap Running" or "[ ] Pre Snap Running"
+          runtime_label = manager_running and "Pre Snap Running" or "Pre Snap Stopped"
           runtime_detail = "Manager: " .. tostring(manager_status or "")
           if manager_running then
             runtime_r, runtime_g, runtime_b = 0.84, 0.90, 0.84
@@ -5020,7 +5726,7 @@ function OzChordTrack.run_dockable_panel()
         else
           local runtime = describe_live_runtime_status()
           runtime_running = runtime.running
-          runtime_label = runtime.running and "[x] Post Snap Running" or "[ ] Post Snap Running"
+          runtime_label = runtime.running and "Post Snap Running" or "Post Snap Stopped"
           runtime_detail = runtime.detail or ""
           runtime_r = runtime.detail_r or 0.84
           runtime_g = runtime.detail_g or 0.84
@@ -5029,20 +5735,20 @@ function OzChordTrack.run_dockable_panel()
 
         label("Selected Track Snap", density.heading_font, 0.95, 0.95, 0.98)
         label("Selected tracks: " .. mode_text, density.body_font)
-        button_row(arming_toggle_label_for_selected_tracks(selected_infos), function() toggle_selected_tracks_follow_arming(selected_infos) end)
+        local arming = selected_tracks_follow_arming_state(selected_infos)
+        local arming_switch_state = (arming and arming.mixed) and "mixed" or ((arming and arming.all_armed) and "on" or "off")
+        toggle_switch_row("Arm selected tracks (ready to snap)", arming_switch_state, function() toggle_selected_tracks_follow_arming(selected_infos) end)
         button_row("UnArm All", disarm_all_target_tracks_follow)
         button_row("Snap selected tracks now (Follow mode)", run_snap_selected_tracks_by_arm_action)
 
         spacer(density.spacer_h)
         label("Pre/Post Recording", density.heading_font, 0.95, 0.95, 0.98)
-        button_row(
-          ((pipeline_mode == NEW_NOTE_SNAP_PIPELINE_PRE) and "(●) " or "(○) ") .. "Pre Recording (Input JSFX)",
-          function() apply_new_note_pipeline_mode(NEW_NOTE_SNAP_PIPELINE_PRE) end
-        )
-        button_row(
-          ((pipeline_mode == NEW_NOTE_SNAP_PIPELINE_POST) and "(●) " or "(○) ") .. "Post Recording (Live engine)",
-          function() apply_new_note_pipeline_mode(NEW_NOTE_SNAP_PIPELINE_POST) end
-        )
+        segmented_option_row({
+          { id = NEW_NOTE_SNAP_PIPELINE_PRE, label = "Pre" },
+          { id = NEW_NOTE_SNAP_PIPELINE_POST, label = "Post" },
+        }, pipeline_mode, function(selected)
+          apply_new_note_pipeline_mode(selected)
+        end)
 
         spacer(density.spacer_h)
         label("Snap Method", density.heading_font, 0.95, 0.95, 0.98)
@@ -5056,10 +5762,26 @@ function OzChordTrack.run_dockable_panel()
 
         for i = 1, #modes do
           local mode = modes[i]
-          local mode_snap = auto_snap_arm_mode_to_snap_mode(mode.id) or normalize_snap_mode(mode.id)
-          local marker = (mode_snap == effective_snap_mode) and "(●) " or "(○) "
-          button_row(marker .. mode.label, function() apply_selected_mode(mode.id) end)
+          mode._snap_mode = auto_snap_arm_mode_to_snap_mode(mode.id) or normalize_snap_mode(mode.id)
         end
+
+        segmented_option_row({
+          { id = modes[1].id, label = "Chords" },
+          { id = modes[2].id, label = "Scales" },
+          { id = modes[3].id, label = "C+S" },
+          { id = modes[4].id, label = "Flow" },
+        },
+        (function()
+          for i = 1, #modes do
+            if modes[i]._snap_mode == effective_snap_mode then
+              return modes[i].id
+            end
+          end
+          return modes[3].id
+        end)(),
+        function(selected_id)
+          apply_selected_mode(selected_id)
+        end)
 
         spacer(density.spacer_h)
         label("Runtime", density.heading_font, 0.95, 0.95, 0.98)
@@ -5069,12 +5791,18 @@ function OzChordTrack.run_dockable_panel()
 
         spacer(density.spacer_h)
         label("Voicing", density.heading_font, 0.95, 0.95, 0.98)
-        button_row((ui_state.allow_snap_inversions and "[x] " or "[ ] ") .. "Allow snap inversions", function()
+        toggle_switch_row("Allow snap inversions", ui_state.allow_snap_inversions and "on" or "off", function()
           local next_value = not ui_state.allow_snap_inversions
           SnapSettings.set_proj_bool(0, EXT_SECTION, ALLOW_SNAP_INVERSIONS_KEY, next_value)
           ui_state.allow_snap_inversions = next_value
           set_status(SnapSettings.toggle_status("Allow snap inversions", next_value))
         end)
+
+        spacer(density.spacer_h)
+        label("Timing", density.heading_font, 0.95, 0.95, 0.98)
+        label("Record timing offset: " .. record_timing_offset_ms_to_label(ui_state.record_timing_offset_ms), density.body_font)
+        menu_button_row("Set record timing offset (coarse/fine) ▼", apply_record_timing_offset_menu)
+        label("Positive values place recorded notes later.", density.meta_font, 0.80, 0.80, 0.84)
 
         spacer(density.spacer_h)
         label("Input Snap Utilities", density.heading_font, 0.95, 0.95, 0.98)
@@ -5083,6 +5811,7 @@ function OzChordTrack.run_dockable_panel()
 
       elseif target_tab == "theme" then
         local resolved = resolve_chord_block_theme(ui_state.block_theme)
+        local highlight_r, highlight_g, highlight_b, highlight_is_custom, highlight_theme_scope = resolve_block_highlight_preview_rgb01(ui_state.block_theme)
 
         label("Chord Block Theme", density.heading_font, 0.95, 0.95, 0.98)
         label("Current: " .. chord_block_theme_to_display_label(ui_state.block_theme), density.body_font)
@@ -5103,6 +5832,24 @@ function OzChordTrack.run_dockable_panel()
             set_status(format_theme_set_status(ui_state.block_theme))
           end)
         end
+
+        spacer(density.spacer_h)
+        label("Highlight Color", density.heading_font, 0.95, 0.95, 0.98)
+        label("Current: " .. block_highlight_color_to_hex(highlight_r, highlight_g, highlight_b) .. (highlight_is_custom and (" (Custom for " .. block_highlight_scope_label(highlight_theme_scope) .. ")") or (" (Theme default for " .. block_highlight_scope_label(highlight_theme_scope) .. ")")), density.body_font)
+        color_swatch_row("Click swatch to pick highlight color", highlight_r, highlight_g, highlight_b, function()
+          local picked_r, picked_g, picked_b, ok_pick = choose_block_highlight_color(highlight_r, highlight_g, highlight_b)
+          if not ok_pick then
+            return
+          end
+
+          local saved_r, saved_g, saved_b, saved_theme_scope = set_block_highlight_override_rgb01(highlight_theme_scope, picked_r, picked_g, picked_b)
+          set_status("Highlight color set to " .. block_highlight_color_to_hex(saved_r, saved_g, saved_b) .. " for " .. block_highlight_scope_label(saved_theme_scope) .. ".")
+        end)
+        button_row("Reset highlight color for this theme", function()
+          clear_block_highlight_override(highlight_theme_scope)
+          local reset_r, reset_g, reset_b, _, reset_theme_scope = resolve_block_highlight_preview_rgb01(ui_state.block_theme)
+          set_status("Highlight color reset to " .. block_highlight_color_to_hex(reset_r, reset_g, reset_b) .. " for " .. block_highlight_scope_label(reset_theme_scope) .. ".")
+        end)
 
         spacer(density.spacer_h)
         label("Timeline Align Offset: " .. timeline_calibration_to_label(ui_state.timeline_calibration_px), density.body_font)
@@ -5397,6 +6144,7 @@ function OzChordTrack.run_compact_popout_panel()
     allow_snap_inversions = SnapSettings.get_proj_bool(0, EXT_SECTION, ALLOW_SNAP_INVERSIONS_KEY, false),
     block_theme = normalize_chord_block_theme(reaper.GetExtState(PANEL_SECTION, "BLOCK_THEME")),
     timeline_calibration_px = get_timeline_calibration_px(),
+    record_timing_offset_ms = get_record_timing_offset_ms(),
     new_note_snap_pipeline_mode = get_new_note_snap_pipeline_mode(),
     new_note_snap_mode = get_new_note_snap_mode(),
     last_window_x = start_x,
@@ -5480,6 +6228,16 @@ function OzChordTrack.run_compact_popout_panel()
 
     ui_state.timeline_calibration_px = set_timeline_calibration_px(selected_px)
     set_status(format_timeline_calibration_status(ui_state.timeline_calibration_px))
+  end
+
+  local function apply_record_timing_offset_menu(x, y)
+    local selected_ms = show_record_timing_offset_menu(x, y, ui_state.record_timing_offset_ms)
+    if selected_ms == nil then
+      return
+    end
+
+    ui_state.record_timing_offset_ms = set_record_timing_offset_ms(selected_ms)
+    set_status(format_record_timing_offset_status(ui_state.record_timing_offset_ms))
   end
 
   local function apply_snap_selected_midi_menu(x, y)
@@ -5792,6 +6550,7 @@ function OzChordTrack.run_compact_popout_panel()
     local _, selected_infos = selected_tracks_auto_snap_arm_summary(chord_track)
     ui_state.block_theme = normalize_chord_block_theme(reaper.GetExtState(PANEL_SECTION, "BLOCK_THEME"))
     ui_state.timeline_calibration_px = get_timeline_calibration_px()
+    ui_state.record_timing_offset_ms = get_record_timing_offset_ms()
     ui_state.new_note_snap_pipeline_mode = get_new_note_snap_pipeline_mode()
     ui_state.new_note_snap_mode = get_new_note_snap_mode()
 
@@ -5964,6 +6723,199 @@ function OzChordTrack.run_compact_popout_panel()
         end)
       end
 
+      local function segmented_option_row(options, selected_id, on_select)
+        row(button_h + button_row_gap, function(draw_y)
+          local count = #options
+          if count <= 0 then
+            return
+          end
+
+          local selected_r, selected_g, selected_b, selected_text_gray = segmented_selected_style_for_theme(ui_state.block_theme)
+
+          local total_w = content_w - 16
+          local segment_w = math.floor(total_w / count)
+          local last_extra = total_w - (segment_w * count)
+          local draw_x = content_x + 8
+          local can_click_row = click and do_draw and point_in_rect(gfx.mouse_x, gfx.mouse_y, content_x, content_y, content_w, content_h)
+
+          for i = 1, count do
+            local option = options[i]
+            local this_w = segment_w
+            if i == count then
+              this_w = this_w + last_extra
+            end
+
+            local hovered = can_click_row and point_in_rect(gfx.mouse_x, gfx.mouse_y, draw_x, draw_y, this_w, button_h)
+            local selected = option.id == selected_id
+
+            if selected then
+              gfx.set(selected_r, selected_g, selected_b, 1)
+            elseif hovered then
+              gfx.set(0.28, 0.28, 0.30, 1)
+            else
+              gfx.set(0.21, 0.21, 0.23, 1)
+            end
+            gfx.rect(draw_x, draw_y, this_w, button_h, 1)
+
+            gfx.set(0.10, 0.10, 0.10, 1)
+            gfx.rect(draw_x, draw_y, this_w, button_h, 0)
+
+            gfx.setfont(1, "Segoe UI", button_font)
+            local text_color = selected and selected_text_gray or 0.92
+            gfx.set(text_color, text_color, text_color, 1)
+            local display_label = fit_text_to_width(option.label, this_w - 8, button_font)
+            local text_w, text_h = gfx.measurestr(display_label)
+            gfx.x = draw_x + math.max(4, (this_w - text_w) * 0.5)
+            gfx.y = draw_y + math.max(2, (button_h - text_h) * 0.5)
+            gfx.drawstr(display_label)
+
+            if hovered and can_click_row then
+              on_select(option.id)
+            end
+
+            draw_x = draw_x + this_w
+          end
+        end)
+      end
+
+      local function color_swatch_row(text, swatch_r, swatch_g, swatch_b, callback)
+        row(button_h + button_row_gap, function(draw_y)
+          local row_x = content_x + 8
+          local row_w = content_w - 16
+          local can_click_row = do_draw and point_in_rect(gfx.mouse_x, gfx.mouse_y, content_x, content_y, content_w, content_h)
+          local hovered = can_click_row and point_in_rect(gfx.mouse_x, gfx.mouse_y, row_x, draw_y, row_w, button_h)
+
+          if hovered then
+            gfx.set(0.28, 0.28, 0.30, 1)
+          else
+            gfx.set(0.21, 0.21, 0.23, 1)
+          end
+          gfx.rect(row_x, draw_y, row_w, button_h, 1)
+
+          gfx.set(0.10, 0.10, 0.11, 1)
+          gfx.rect(row_x, draw_y, row_w, button_h, 0)
+
+          local swatch_h = math.max(12, button_h - 8)
+          local swatch_w = math.max(22, math.floor(swatch_h * 1.9))
+          local swatch_x = row_x + 6
+          local swatch_y = draw_y + math.floor((button_h - swatch_h) * 0.5)
+
+          gfx.set(clamp_color01(swatch_r), clamp_color01(swatch_g), clamp_color01(swatch_b), 1)
+          gfx.rect(swatch_x, swatch_y, swatch_w, swatch_h, 1)
+          gfx.set(0.08, 0.08, 0.09, 1)
+          gfx.rect(swatch_x, swatch_y, swatch_w, swatch_h, 0)
+
+          gfx.setfont(1, "Segoe UI", button_font)
+          gfx.set(0.92, 0.92, 0.94, 1)
+          local display = fit_text_to_width(text, row_w - swatch_w - 20, button_font)
+          local _, text_h = gfx.measurestr(display)
+          gfx.x = swatch_x + swatch_w + 8
+          gfx.y = draw_y + math.max(2, (button_h - text_h) * 0.5)
+          gfx.drawstr(display)
+
+          if hovered and can_click_row and click then
+            callback()
+          end
+        end)
+      end
+
+      local function toggle_switch_row(text, state, callback)
+        row(button_h + button_row_gap, function(draw_y)
+          local row_x = content_x + 8
+          local row_w = content_w - 16
+          local row_h = button_h
+          local can_click_row = do_draw and point_in_rect(gfx.mouse_x, gfx.mouse_y, content_x, content_y, content_w, content_h)
+          local hovered = can_click_row and point_in_rect(gfx.mouse_x, gfx.mouse_y, row_x, draw_y, row_w, row_h)
+          local selected_r, selected_g, selected_b = segmented_selected_style_for_theme(ui_state.block_theme)
+
+          if hovered then
+            gfx.set(0.28, 0.28, 0.30, 1)
+          else
+            gfx.set(0.21, 0.21, 0.23, 1)
+          end
+          gfx.rect(row_x, draw_y, row_w, row_h, 1)
+
+          gfx.set(0.10, 0.10, 0.11, 1)
+          gfx.rect(row_x, draw_y, row_w, row_h, 0)
+
+          local switch_h = math.max(14, row_h - 8)
+          local switch_w = math.max(40, math.floor(switch_h * 1.95))
+          local switch_x = row_x + row_w - switch_w - 8
+          local switch_y = draw_y + math.floor((row_h - switch_h) * 0.5)
+
+          local is_on = state == "on"
+          local is_mixed = state == "mixed"
+
+          local track_r, track_g, track_b = 0.33, 0.33, 0.36
+          if is_on then
+            track_r = clamp_color01((selected_r * 0.45) + 0.12)
+            track_g = clamp_color01((selected_g * 0.45) + 0.12)
+            track_b = clamp_color01((selected_b * 0.45) + 0.12)
+          elseif is_mixed then
+            track_r = clamp_color01((selected_r * 0.30) + 0.16)
+            track_g = clamp_color01((selected_g * 0.30) + 0.16)
+            track_b = clamp_color01((selected_b * 0.30) + 0.16)
+          end
+          if hovered then
+            track_r = clamp_color01(track_r + 0.05)
+            track_g = clamp_color01(track_g + 0.05)
+            track_b = clamp_color01(track_b + 0.05)
+          end
+
+          gfx.set(track_r, track_g, track_b, 1)
+          gfx.rect(switch_x, switch_y, switch_w, switch_h, 1)
+          gfx.set(0.09, 0.09, 0.10, 1)
+          gfx.rect(switch_x, switch_y, switch_w, switch_h, 0)
+
+          local knob_d = math.max(10, switch_h - 4)
+          local knob_range = switch_w - knob_d - 4
+          local knob_t = 0
+          if is_on then
+            knob_t = 1
+          elseif is_mixed then
+            knob_t = 0.5
+          end
+          local knob_x = switch_x + 2 + (knob_range * knob_t)
+          local knob_y = switch_y + 2
+
+          gfx.set(0.90, 0.90, 0.92, 1)
+          gfx.rect(knob_x, knob_y, knob_d, knob_d, 1)
+          gfx.set(0.14, 0.14, 0.16, 1)
+          gfx.rect(knob_x, knob_y, knob_d, knob_d, 0)
+
+          local state_text = "OFF"
+          local state_r, state_g, state_b = 0.70, 0.70, 0.74
+          if is_on then
+            state_text = "ON"
+            state_r, state_g, state_b = selected_r, selected_g, selected_b
+          elseif is_mixed then
+            state_text = "MIX"
+            state_r, state_g, state_b = selected_r, selected_g, selected_b
+          end
+
+          gfx.setfont(1, "Segoe UI", math.max(10, button_font - 1))
+          gfx.set(state_r, state_g, state_b, 1)
+          local state_w, state_h = gfx.measurestr(state_text)
+          local state_x = switch_x - state_w - 8
+          gfx.x = state_x
+          gfx.y = draw_y + math.max(2, (row_h - state_h) * 0.5)
+          gfx.drawstr(state_text)
+
+          gfx.setfont(1, "Segoe UI", button_font)
+          gfx.set(0.92, 0.92, 0.94, 1)
+          local label_max_w = math.max(20, (state_x - row_x) - 10)
+          local display = fit_text_to_width(text, label_max_w, button_font)
+          local _, text_h = gfx.measurestr(display)
+          gfx.x = row_x + 8
+          gfx.y = draw_y + math.max(2, (row_h - text_h) * 0.5)
+          gfx.drawstr(display)
+
+          if hovered and can_click_row and click then
+            callback()
+          end
+        end)
+      end
+
       if ui_state.active_tab == "snap" then
         local selected_mode, mode_text = selected_target_mode_summary()
         local pipeline_mode = normalize_new_note_snap_pipeline_mode(ui_state.new_note_snap_pipeline_mode)
@@ -5982,7 +6934,7 @@ function OzChordTrack.run_compact_popout_panel()
         if pipeline_mode == NEW_NOTE_SNAP_PIPELINE_PRE then
           local manager_running, manager_status = get_input_manager_runtime_status()
           runtime_running = manager_running
-          runtime_label = manager_running and "[x] Pre Snap Running" or "[ ] Pre Snap Running"
+          runtime_label = manager_running and "Pre Snap Running" or "Pre Snap Stopped"
           runtime_detail = "Manager: " .. tostring(manager_status or "")
           if manager_running then
             runtime_r, runtime_g, runtime_b = 0.84, 0.90, 0.84
@@ -5990,7 +6942,7 @@ function OzChordTrack.run_compact_popout_panel()
         else
           local runtime = describe_live_runtime_status()
           runtime_running = runtime.running
-          runtime_label = runtime.running and "[x] Post Snap Running" or "[ ] Post Snap Running"
+          runtime_label = runtime.running and "Post Snap Running" or "Post Snap Stopped"
           runtime_detail = runtime.detail or ""
           runtime_r = runtime.detail_r or 0.84
           runtime_g = runtime.detail_g or 0.84
@@ -5999,20 +6951,20 @@ function OzChordTrack.run_compact_popout_panel()
 
         label("Selected Track Snap", heading_font, 0.95, 0.95, 0.98)
         label("Selected tracks: " .. mode_text, body_font)
-        button_row(arming_toggle_label_for_selected_tracks(selected_infos), function() toggle_selected_tracks_follow_arming(selected_infos) end)
+        local arming = selected_tracks_follow_arming_state(selected_infos)
+        local arming_switch_state = (arming and arming.mixed) and "mixed" or ((arming and arming.all_armed) and "on" or "off")
+        toggle_switch_row("Arm selected tracks (ready to snap)", arming_switch_state, function() toggle_selected_tracks_follow_arming(selected_infos) end)
         button_row("UnArm All", disarm_all_target_tracks_follow)
         button_row("Snap selected tracks now (Follow mode)", run_snap_selected_tracks_by_arm_action)
 
         spacer(spacer_h)
         label("Pre/Post Recording", heading_font, 0.95, 0.95, 0.98)
-        button_row(
-          ((pipeline_mode == NEW_NOTE_SNAP_PIPELINE_PRE) and "(●) " or "(○) ") .. "Pre Recording (Input JSFX)",
-          function() apply_new_note_pipeline_mode(NEW_NOTE_SNAP_PIPELINE_PRE) end
-        )
-        button_row(
-          ((pipeline_mode == NEW_NOTE_SNAP_PIPELINE_POST) and "(●) " or "(○) ") .. "Post Recording (Live engine)",
-          function() apply_new_note_pipeline_mode(NEW_NOTE_SNAP_PIPELINE_POST) end
-        )
+        segmented_option_row({
+          { id = NEW_NOTE_SNAP_PIPELINE_PRE, label = "Pre" },
+          { id = NEW_NOTE_SNAP_PIPELINE_POST, label = "Post" },
+        }, pipeline_mode, function(selected)
+          apply_new_note_pipeline_mode(selected)
+        end)
 
         spacer(spacer_h)
         label("Snap Method", heading_font, 0.95, 0.95, 0.98)
@@ -6026,10 +6978,26 @@ function OzChordTrack.run_compact_popout_panel()
 
         for i = 1, #modes do
           local mode = modes[i]
-          local mode_snap = auto_snap_arm_mode_to_snap_mode(mode.id) or normalize_snap_mode(mode.id)
-          local marker = (mode_snap == effective_snap_mode) and "(●) " or "(○) "
-          button_row(marker .. mode.label, function() apply_selected_mode(mode.id) end)
+          mode._snap_mode = auto_snap_arm_mode_to_snap_mode(mode.id) or normalize_snap_mode(mode.id)
         end
+
+        segmented_option_row({
+          { id = modes[1].id, label = "Chords" },
+          { id = modes[2].id, label = "Scales" },
+          { id = modes[3].id, label = "C+S" },
+          { id = modes[4].id, label = "Flow" },
+        },
+        (function()
+          for i = 1, #modes do
+            if modes[i]._snap_mode == effective_snap_mode then
+              return modes[i].id
+            end
+          end
+          return modes[3].id
+        end)(),
+        function(selected_id)
+          apply_selected_mode(selected_id)
+        end)
 
         spacer(spacer_h)
         label("Runtime", heading_font, 0.95, 0.95, 0.98)
@@ -6043,12 +7011,18 @@ function OzChordTrack.run_compact_popout_panel()
 
         spacer(spacer_h)
         label("Voicing", heading_font, 0.95, 0.95, 0.98)
-        button_row((ui_state.allow_snap_inversions and "[x] " or "[ ] ") .. "Allow snap inversions", function()
+        toggle_switch_row("Allow snap inversions", ui_state.allow_snap_inversions and "on" or "off", function()
           local next_value = not ui_state.allow_snap_inversions
           SnapSettings.set_proj_bool(0, EXT_SECTION, ALLOW_SNAP_INVERSIONS_KEY, next_value)
           ui_state.allow_snap_inversions = next_value
           set_status(SnapSettings.toggle_status("Allow snap inversions", next_value))
         end)
+
+        spacer(spacer_h)
+        label("Timing", heading_font, 0.95, 0.95, 0.98)
+        label("Record timing offset: " .. record_timing_offset_ms_to_label(ui_state.record_timing_offset_ms), body_font)
+        menu_button_row("Set record timing offset (coarse/fine) ▼", apply_record_timing_offset_menu)
+        label("Positive values place recorded notes later.", meta_font, 0.80, 0.80, 0.84)
 
         spacer(spacer_h)
         label("Input Snap Utilities", heading_font, 0.95, 0.95, 0.98)
@@ -6057,6 +7031,7 @@ function OzChordTrack.run_compact_popout_panel()
 
       elseif ui_state.active_tab == "theme" then
         local resolved = resolve_chord_block_theme(ui_state.block_theme)
+        local highlight_r, highlight_g, highlight_b, highlight_is_custom, highlight_theme_scope = resolve_block_highlight_preview_rgb01(ui_state.block_theme)
 
         label("Chord Block Theme", heading_font, 0.95, 0.95, 0.98)
         label("Current: " .. chord_block_theme_to_display_label(ui_state.block_theme), body_font)
@@ -6077,6 +7052,24 @@ function OzChordTrack.run_compact_popout_panel()
             set_status(format_theme_set_status(ui_state.block_theme))
           end)
         end
+
+        spacer(spacer_h)
+        label("Highlight Color", heading_font, 0.95, 0.95, 0.98)
+        label("Current: " .. block_highlight_color_to_hex(highlight_r, highlight_g, highlight_b) .. (highlight_is_custom and (" (Custom for " .. block_highlight_scope_label(highlight_theme_scope) .. ")") or (" (Theme default for " .. block_highlight_scope_label(highlight_theme_scope) .. ")")), body_font)
+        color_swatch_row("Click swatch to pick highlight color", highlight_r, highlight_g, highlight_b, function()
+          local picked_r, picked_g, picked_b, ok_pick = choose_block_highlight_color(highlight_r, highlight_g, highlight_b)
+          if not ok_pick then
+            return
+          end
+
+          local saved_r, saved_g, saved_b, saved_theme_scope = set_block_highlight_override_rgb01(highlight_theme_scope, picked_r, picked_g, picked_b)
+          set_status("Highlight color set to " .. block_highlight_color_to_hex(saved_r, saved_g, saved_b) .. " for " .. block_highlight_scope_label(saved_theme_scope) .. ".")
+        end)
+        button_row("Reset highlight color for this theme", function()
+          clear_block_highlight_override(highlight_theme_scope)
+          local reset_r, reset_g, reset_b, _, reset_theme_scope = resolve_block_highlight_preview_rgb01(ui_state.block_theme)
+          set_status("Highlight color reset to " .. block_highlight_color_to_hex(reset_r, reset_g, reset_b) .. " for " .. block_highlight_scope_label(reset_theme_scope) .. ".")
+        end)
 
         spacer(spacer_h)
         label("Timeline Align Offset: " .. timeline_calibration_to_label(ui_state.timeline_calibration_px), body_font)
