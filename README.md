@@ -4,8 +4,8 @@ This script set gives a Chord Track-style workflow in REAPER with:
 
 1. A selected MIDI chord source track.
 2. Key/Scale capture from the MIDI editor Key Snap root + scale.
-3. Snap modes for existing MIDI and live/recorded MIDI.
-4. Per-track Auto-snap Arm modes (Studio One-style): **Off**, **Chords**, **Scales**, **Chords + Scales**.
+3. Snap modes for existing MIDI and live/recorded MIDI: **Chords**, **Scales**, **Chords + Scales**, **Melodic Flow**.
+4. Per-track Auto-snap Arm modes (Studio One-style): **Off**, **Chords**, **Scales**, **Chords + Scales** (plus **Melodic Flow** from the Snap tab method selector).
 5. A dockable panel showing key/scale, chord track, selected track arm status, and arm/snap controls.
 6. Chord blocks in the panel timeline lane (Scaler-style) with chord name + scale degree labels.
 7. Interactive chord blocks: double-click to open/zoom for editing, right-click for inversions/substitutions/chord transforms.
@@ -66,11 +66,11 @@ Default feed URL (after push):
 
 Latest release:
 
-- `v0.1.11` â€” `https://github.com/ozone1979/oz-reaper-chord-track/releases/tag/v0.1.11`
-- `v0.1.9` â€” `https://github.com/ozone1979/oz-reaper-chord-track/releases/tag/v0.1.9`
-- `v0.1.8` â€” `https://github.com/ozone1979/oz-reaper-chord-track/releases/tag/v0.1.8`
-- `v0.1.4` â€” `https://github.com/ozone1979/oz-reaper-chord-track/releases/tag/v0.1.4`
-- `v0.1.2` — `https://github.com/ozone1979/oz-reaper-chord-track/releases/tag/v0.1.2`
+- `v0.1.11` - `https://github.com/ozone1979/oz-reaper-chord-track/releases/tag/v0.1.11`
+- `v0.1.9` - `https://github.com/ozone1979/oz-reaper-chord-track/releases/tag/v0.1.9`
+- `v0.1.8` - `https://github.com/ozone1979/oz-reaper-chord-track/releases/tag/v0.1.8`
+- `v0.1.4` - `https://github.com/ozone1979/oz-reaper-chord-track/releases/tag/v0.1.4`
+- `v0.1.2` - `https://github.com/ozone1979/oz-reaper-chord-track/releases/tag/v0.1.2`
 
 Regenerate the index after adding/removing actions or support files:
 
@@ -122,6 +122,8 @@ Run one of:
 - **Snap selected MIDI to chords only**
 - **Snap selected MIDI to scale only**
 
+Melodic Flow for existing notes is available from the **Snap tab** selected-track workflow: set **Snap Method = Flow**, then run **Snap selected tracks now (Follow mode)**.
+
 Target priority is:
 
 1. Active MIDI editor take,
@@ -145,6 +147,8 @@ Set selected target track(s) with:
 - **Arm selected tracks for auto snap Chords+Scales**
 - **Disarm selected tracks auto snap**
 - **UnArm all target tracks auto snap**
+
+For **Melodic Flow** assignment, use **Snap tab -> Snap Method -> Flow** on the selected target tracks.
 
 Then run:
 
@@ -170,7 +174,7 @@ The panel shows:
 It also includes:
 
 - **Home tab**: scale info/sync, chord track label + assign button, and selected-track Follow summary
-- **Snap tab**: merged Follow+Snap workflow for selected tracks with four core controls (**Arm = Ready to snap**, **Snap now**, **Pre/Post Recording**, **Snap Method**) plus an **UnArm All** convenience button and runtime diagnostics
+- **Snap tab**: merged Follow+Snap workflow for selected tracks with four core controls (**Arm = Ready to snap**, **Snap now**, **Pre/Post Recording**, **Snap Method = Chords / Scales / C+S / Flow**) plus an **UnArm All** convenience button and runtime diagnostics
 - **Theme tab**: chord block theme controls (Auto / Blue / Purple / Neutral)
 - **Theme tab**: timeline align offset control (−32 px to +32 px) with coarse (1 px) and fine (0.5 px) modes for ruler/chord-lane alignment
 - A top-right compact-view toggle icon (Normal/Compact)
@@ -204,6 +208,16 @@ Chord-block interactions:
 	- Substitute Relative Minor / Relative Major / Tritone
 - Labels update automatically when chord notes change
 - **Auto** theme follows REAPER theme brightness (dark themes bias Purple; light themes bias Neutral)
+
+## Melodic Flow
+
+Melodic Flow is designed to keep movement musical and contour-aware while still locking to harmonic context.
+
+- White-key lanes map to harmonic targets relative to the active chord/root (chord tones + upper extensions).
+- Black-key lanes are treated as passing tones between neighboring mapped white-key targets (no long jumps across unrelated targets).
+- Honors **Allow snap inversions** in the Snap tab.
+- Works in both **Pre** (input JSFX manager) and **Post** (live engine) new-note snap pipelines.
+- Can be assigned per selected track from **Snap tab -> Snap Method -> Flow**.
 
 ## Live mode (experimental)
 
