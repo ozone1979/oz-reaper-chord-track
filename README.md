@@ -66,7 +66,7 @@ Default feed URL (after push):
 
 Latest release:
 
-- `v0.1.10` â€” `https://github.com/ozone1979/oz-reaper-chord-track/releases/tag/v0.1.10`
+- `v0.1.11` â€” `https://github.com/ozone1979/oz-reaper-chord-track/releases/tag/v0.1.11`
 - `v0.1.9` â€” `https://github.com/ozone1979/oz-reaper-chord-track/releases/tag/v0.1.9`
 - `v0.1.8` â€” `https://github.com/ozone1979/oz-reaper-chord-track/releases/tag/v0.1.8`
 - `v0.1.4` â€” `https://github.com/ozone1979/oz-reaper-chord-track/releases/tag/v0.1.4`
@@ -285,6 +285,7 @@ Notes:
 - Chord+Scale mode prefers intersection; if empty, it falls back to chord tones
 - Live behavior is best-effort and applies to newly detected notes on live target tracks (record-armed, or input-monitored in fixed live modes)
 - Status/message wording is now normalized across Action List dialogs, the docked panel, and the compact popout window
+
 
 
 
