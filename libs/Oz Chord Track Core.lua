@@ -4555,7 +4555,7 @@ function OzChordTrack.run_dockable_panel()
       (b * (1 - mix)) + (gray * mix)
   end
 
-  local function block_style_for_quality(quality, hovered, theme, highlight_override_r, highlight_override_g, highlight_override_b)
+  local function block_style_for_quality(quality, hovered, theme)
     local body_r, body_g, body_b = 0.16, 0.30, 0.45
     local accent_r, accent_g, accent_b = 0.35, 0.62, 0.90
     local badge_r, badge_g, badge_b = 0.25, 0.42, 0.62
@@ -4612,12 +4612,6 @@ function OzChordTrack.run_dockable_panel()
         clamp01(accent_r + 0.03),
         clamp01(accent_g + 0.03),
         clamp01(accent_b + 0.04)
-    end
-
-    if highlight_override_r ~= nil then
-      accent_r = clamp01(highlight_override_r)
-      accent_g = clamp01(highlight_override_g)
-      accent_b = clamp01(highlight_override_b)
     end
 
     local hover_boost = hovered and 0.08 or 0
@@ -4723,7 +4717,6 @@ function OzChordTrack.run_dockable_panel()
     gfx.setfont(1, "Segoe UI", 12)
     gfx.set(0.70, 0.72, 0.78, 1)
     local active_theme = resolve_chord_block_theme(ui_state.block_theme)
-    local highlight_override_r, highlight_override_g, highlight_override_b = get_block_highlight_override_rgb01(active_theme)
     local blocks_summary = tostring(#ui_state.chord_blocks) .. " blocks | " .. chord_block_theme_to_display_label(ui_state.block_theme)
     local summary_w = gfx.measurestr(blocks_summary)
     gfx.x = x + w - summary_w - 10
@@ -4734,8 +4727,7 @@ function OzChordTrack.run_dockable_panel()
     local lane_h = h - 30
     local lane_x = x + 1
     local lane_w = w - 2
-    local timeline_x = lane_x
-    local timeline_w = lane_w
+    local lane_right = lane_x + lane_w
 
     gfx.set(0.07, 0.07, 0.08, 1)
     gfx.rect(lane_x, lane_top, lane_w, lane_h, 1)
@@ -4745,41 +4737,20 @@ function OzChordTrack.run_dockable_panel()
       return
     end
 
+    local map_span_w = lane_w
     local arrange_hzoom = tonumber(reaper.GetHZoomLevel()) or 0
-    if arrange_hzoom > 0 and lane_w > 0 then
-      local arrange_content_w = math.floor((view_len * arrange_hzoom) + 0.5)
-      if arrange_content_w > 0 then
-        timeline_w = math.max(10, math.min(lane_w, arrange_content_w))
-        timeline_x = lane_x + math.max(0, lane_w - timeline_w)
+    if arrange_hzoom > 0 then
+      local expected_span_w = (view_len * arrange_hzoom)
+      if expected_span_w > 1 then
+        map_span_w = math.max(1, math.min(lane_w, expected_span_w))
       end
     end
 
-    if timeline_w < 10 then
-      timeline_x = lane_x
-      timeline_w = lane_w
-    end
-
     local timeline_calibration_px = clamp_timeline_calibration_px(ui_state.timeline_calibration_px)
-    if timeline_calibration_px ~= 0 then
-      timeline_x = timeline_x + timeline_calibration_px
-      timeline_w = timeline_w - timeline_calibration_px
-    end
-
-    if timeline_x < lane_x then
-      local push = lane_x - timeline_x
-      timeline_x = lane_x
-      timeline_w = timeline_w - push
-    end
-
-    local lane_right = lane_x + lane_w
-    local timeline_right = timeline_x + timeline_w
-    if timeline_right > lane_right then
-      timeline_w = timeline_w - (timeline_right - lane_right)
-    end
-
-    if timeline_w < 10 then
-      timeline_w = math.min(lane_w, 10)
-      timeline_x = lane_x + math.max(0, lane_w - timeline_w)
+    local function time_to_lane_x(time_position)
+      -- Keep calibration as a pure translation to avoid time-to-pixel scale drift.
+      local ratio = (time_position - arrange_start) / view_len
+      return lane_x + (ratio * map_span_w) + timeline_calibration_px
     end
 
     local qn_start = tonumber(reaper.TimeMap2_timeToQN(0, arrange_start)) or 0
@@ -4792,8 +4763,8 @@ function OzChordTrack.run_dockable_panel()
 
     local drew_grid = false
     local qn_span = qn_end - qn_start
-    if qn_span > 0 and timeline_w > 0 then
-      local px_per_qn = timeline_w / qn_span
+    if qn_span > 0 and map_span_w > 0 then
+      local px_per_qn = map_span_w / qn_span
       local px_per_div = px_per_qn * grid_division
       local min_px_step = 10
       local skip = 1
@@ -4810,8 +4781,7 @@ function OzChordTrack.run_dockable_panel()
         local qn_pos = index * grid_division
         local line_time = reaper.TimeMap2_QNToTime(0, qn_pos)
         if line_time >= arrange_start and line_time <= arrange_end then
-          local ratio = (line_time - arrange_start) / view_len
-          local gx = timeline_x + math.floor((ratio * timeline_w) + 0.5)
+          local gx = math.floor(time_to_lane_x(line_time) + 0.5)
 
           if strong_step > 0 and (index % strong_step) == 0 then
             gfx.set(0.23, 0.23, 0.29, 1)
@@ -4821,8 +4791,10 @@ function OzChordTrack.run_dockable_panel()
             gfx.set(0.12, 0.12, 0.14, 1)
           end
 
-          gfx.line(gx, lane_top + 1, gx, lane_top + lane_h - 2)
-          drew_grid = true
+          if gx >= lane_x and gx <= lane_right then
+            gfx.line(gx, lane_top + 1, gx, lane_top + lane_h - 2)
+            drew_grid = true
+          end
         end
       end
     end
@@ -4830,14 +4802,16 @@ function OzChordTrack.run_dockable_panel()
     if not drew_grid then
       local fallback_lines = 24
       for step = 0, fallback_lines do
-        local ratio = step / fallback_lines
-        local gx = timeline_x + math.floor((ratio * timeline_w) + 0.5)
+        local fallback_time = arrange_start + (view_len * (step / fallback_lines))
+        local gx = math.floor(time_to_lane_x(fallback_time) + 0.5)
         if step % 4 == 0 then
           gfx.set(0.18, 0.18, 0.22, 1)
         else
           gfx.set(0.12, 0.12, 0.14, 1)
         end
-        gfx.line(gx, lane_top + 1, gx, lane_top + lane_h - 2)
+        if gx >= lane_x and gx <= lane_right then
+          gfx.line(gx, lane_top + 1, gx, lane_top + lane_h - 2)
+        end
       end
     end
 
@@ -4850,113 +4824,117 @@ function OzChordTrack.run_dockable_panel()
       local visible_end = math.min(block.end_time, arrange_end)
 
       if visible_end > visible_start then
-        local bx = timeline_x + ((visible_start - arrange_start) / view_len) * timeline_w
-        local bw = ((visible_end - visible_start) / view_len) * timeline_w
-        if bw < 4 then bw = 4 end
-        local timeline_right = timeline_x + timeline_w
-        if (bx + bw) > timeline_right then
-          bw = timeline_right - bx
-        end
-        if bw < 1 then
-          bw = 1
-        end
-        local by = lane_top + 4
-        local bh = lane_h - 8
-
-        local is_hovered = point_in_rect(mx, my, bx, by, bw, bh)
-        if is_hovered then
-          hovered_block = block
+        local start_x = time_to_lane_x(visible_start)
+        local end_x = time_to_lane_x(visible_end)
+        if (end_x - start_x) < 4 then
+          local center_x = (start_x + end_x) * 0.5
+          start_x = center_x - 2
+          end_x = center_x + 2
         end
 
-        local style = block_style_for_quality(block.quality, is_hovered, active_theme, highlight_override_r, highlight_override_g, highlight_override_b)
+        local bx = math.floor(math.max(lane_x, start_x))
+        local block_right = math.ceil(math.min(lane_right, end_x))
+        local bw = block_right - bx
 
-        local block_pad = math.max(3, math.floor(math.min(bw, bh) * 0.08))
-        local accent_h = math.max(3, math.min(7, math.floor(bh * 0.12)))
-        local shadow_h = math.max(2, math.min(6, math.floor(bh * 0.10)))
+        if bw >= 1 then
+          local by = lane_top + 4
+          local bh = lane_h - 8
 
-        gfx.set(style.body_r, style.body_g, style.body_b, 1)
-        gfx.rect(bx, by, bw, bh, 1)
+          local is_hovered = point_in_rect(mx, my, bx, by, bw, bh)
+          if is_hovered then
+            hovered_block = block
+          end
 
-        gfx.set(style.accent_r, style.accent_g, style.accent_b, 1)
-        gfx.rect(bx, by, bw, accent_h, 1)
+          local style = block_style_for_quality(block.quality, is_hovered, active_theme)
 
-        gfx.set(0.06, 0.06, 0.07, 0.45)
-        gfx.rect(bx + 1, by + bh - shadow_h - 1, bw - 2, shadow_h, 1)
+          local block_pad = math.max(3, math.floor(math.min(bw, bh) * 0.08))
+          local accent_h = math.max(3, math.min(7, math.floor(bh * 0.12)))
+          local shadow_h = math.max(2, math.min(6, math.floor(bh * 0.10)))
 
-        gfx.set(0.08, 0.08, 0.08, 1)
-        gfx.rect(bx, by, bw, bh, 0)
+          gfx.set(style.body_r, style.body_g, style.body_b, 1)
+          gfx.rect(bx, by, bw, bh, 1)
 
-        local has_badge = (bw >= 42) and (bh >= 30)
-        local badge_h = 0
-        local badge_y = by + block_pad
-        if has_badge then
-          badge_h = math.max(12, math.min(18, math.floor(bh * 0.22)))
-          local badge_w = math.min(math.max(22, math.floor(bw * 0.34)), bw - (block_pad * 2))
-          local badge_x = bx + block_pad
+          gfx.set(style.accent_r, style.accent_g, style.accent_b, 1)
+          gfx.rect(bx, by, bw, accent_h, 1)
 
-          gfx.set(style.badge_r, style.badge_g, style.badge_b, 1)
-          gfx.rect(badge_x, badge_y, badge_w, badge_h, 1)
-          gfx.set(0.07, 0.07, 0.08, 0.9)
-          gfx.rect(badge_x, badge_y, badge_w, badge_h, 0)
+          gfx.set(0.06, 0.06, 0.07, 0.45)
+          gfx.rect(bx + 1, by + bh - shadow_h - 1, bw - 2, shadow_h, 1)
 
-          local badge_font = math.max(8, math.min(12, badge_h - 3))
-          gfx.setfont(1, "Segoe UI", badge_font)
-          local degree_text = fit_text_to_width(block.degree_label or "?", badge_w - 6, badge_font)
-          local degree_w, degree_h = gfx.measurestr(degree_text)
-          gfx.set(0.95, 0.95, 0.98, 1)
-          gfx.x = badge_x + math.max(3, (badge_w - degree_w) * 0.5)
-          gfx.y = badge_y + math.max(0, (badge_h - degree_h) * 0.5)
-          gfx.drawstr(degree_text)
+          gfx.set(0.08, 0.08, 0.08, 1)
+          gfx.rect(bx, by, bw, bh, 0)
 
-          local quality_slot_w = bw - badge_w - (block_pad * 3)
-          local show_quality = (bw >= 92) and (bh >= 36) and (quality_slot_w >= 28)
-          if show_quality then
-            local quality_font = math.max(8, math.min(10, badge_h - 4))
-            local quality_label = compact_quality_label(block.quality)
-            local quality_text = fit_text_to_width(quality_label, quality_slot_w, quality_font)
-            if quality_text ~= "" then
-              gfx.setfont(1, "Segoe UI", quality_font)
-              local quality_w, quality_h = gfx.measurestr(quality_text)
-              gfx.set(0.82, 0.84, 0.90, 1)
-              gfx.x = bx + bw - quality_w - block_pad
-              gfx.y = badge_y + math.max(0, (badge_h - quality_h) * 0.5)
-              gfx.drawstr(quality_text)
+          local has_badge = (bw >= 42) and (bh >= 30)
+          local badge_h = 0
+          local badge_y = by + block_pad
+          if has_badge then
+            badge_h = math.max(12, math.min(18, math.floor(bh * 0.22)))
+            local badge_w = math.min(math.max(22, math.floor(bw * 0.34)), bw - (block_pad * 2))
+            local badge_x = bx + block_pad
+
+            gfx.set(style.badge_r, style.badge_g, style.badge_b, 1)
+            gfx.rect(badge_x, badge_y, badge_w, badge_h, 1)
+            gfx.set(0.07, 0.07, 0.08, 0.9)
+            gfx.rect(badge_x, badge_y, badge_w, badge_h, 0)
+
+            local badge_font = math.max(8, math.min(12, badge_h - 3))
+            gfx.setfont(1, "Segoe UI", badge_font)
+            local degree_text = fit_text_to_width(block.degree_label or "?", badge_w - 6, badge_font)
+            local degree_w, degree_h = gfx.measurestr(degree_text)
+            gfx.set(0.95, 0.95, 0.98, 1)
+            gfx.x = badge_x + math.max(3, (badge_w - degree_w) * 0.5)
+            gfx.y = badge_y + math.max(0, (badge_h - degree_h) * 0.5)
+            gfx.drawstr(degree_text)
+
+            local quality_slot_w = bw - badge_w - (block_pad * 3)
+            local show_quality = (bw >= 92) and (bh >= 36) and (quality_slot_w >= 28)
+            if show_quality then
+              local quality_font = math.max(8, math.min(10, badge_h - 4))
+              local quality_label = compact_quality_label(block.quality)
+              local quality_text = fit_text_to_width(quality_label, quality_slot_w, quality_font)
+              if quality_text ~= "" then
+                gfx.setfont(1, "Segoe UI", quality_font)
+                local quality_w, quality_h = gfx.measurestr(quality_text)
+                gfx.set(0.82, 0.84, 0.90, 1)
+                gfx.x = bx + bw - quality_w - block_pad
+                gfx.y = badge_y + math.max(0, (badge_h - quality_h) * 0.5)
+                gfx.drawstr(quality_text)
+              end
             end
           end
-        end
 
-        if bw > 22 then
-          local chord_label = block.chord_name or ""
-          if chord_label == "" then
-            chord_label = "?"
-          end
-          if not has_badge and bw <= 64 then
-            chord_label = (block.degree_label or "?") .. " " .. chord_label
-          end
+          if bw > 22 then
+            local chord_label = block.chord_name or ""
+            if chord_label == "" then
+              chord_label = "?"
+            end
+            if not has_badge and bw <= 64 then
+              chord_label = (block.degree_label or "?") .. " " .. chord_label
+            end
 
-          local text_top = by + block_pad
-          if has_badge then
-            text_top = badge_y + badge_h + math.max(2, math.floor(bh * 0.05))
-          end
-          local text_h = math.max(8, (by + bh - block_pad - 1) - text_top)
-          local text_w = math.max(10, bw - (block_pad * 2))
-          local preferred_font = math.max(9, math.min(22, math.floor(math.min(text_h * 0.95, bw * 0.22))))
-          local minimum_font = (bw < 34 or bh < 26) and 7 or 8
+            local text_top = by + block_pad
+            if has_badge then
+              text_top = badge_y + badge_h + math.max(2, math.floor(bh * 0.05))
+            end
+            local text_h = math.max(8, (by + bh - block_pad - 1) - text_top)
+            local text_w = math.max(10, bw - (block_pad * 2))
+            local preferred_font = math.max(9, math.min(22, math.floor(math.min(text_h * 0.95, bw * 0.22))))
+            local minimum_font = (bw < 34 or bh < 26) and 7 or 8
 
-          local fitted_label, fitted_font, chord_w, chord_h = fit_text_and_font(
-            chord_label,
-            text_w,
-            text_h,
-            preferred_font,
-            minimum_font
-          )
+            local fitted_label, fitted_font, chord_w, chord_h = fit_text_and_font(
+              chord_label,
+              text_w,
+              text_h,
+              preferred_font,
+              minimum_font
+            )
 
-          if fitted_label ~= "" then
-            gfx.setfont(1, "Segoe UI", fitted_font)
-            gfx.set(0.98, 0.98, 0.99, 1)
-            gfx.x = bx + math.max(block_pad, (bw - chord_w) * 0.5)
-            gfx.y = text_top + math.max(0, (text_h - chord_h) * 0.5)
-            gfx.drawstr(fitted_label)
+            if fitted_label ~= "" then
+              gfx.setfont(1, "Segoe UI", fitted_font)
+              gfx.set(0.98, 0.98, 0.99, 1)
+              gfx.x = bx + math.max(block_pad, (bw - chord_w) * 0.5)
+              gfx.y = text_top + math.max(0, (text_h - chord_h) * 0.5)
+              gfx.drawstr(fitted_label)
+            end
           end
         end
       end
