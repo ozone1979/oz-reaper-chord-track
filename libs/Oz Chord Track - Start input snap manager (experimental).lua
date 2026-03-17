@@ -4,6 +4,11 @@ local RUN_TOKEN_KEY = "RUN_TOKEN"
 local STATUS_KEY = "STATUS"
 local SNAP_MODE_OVERRIDE_KEY = "SNAP_MODE_OVERRIDE"
 local ALLOW_SNAP_INVERSIONS_KEY = "ALLOW_SNAP_INVERSIONS"
+local MAP_TONIC_TO_C_KEY = "MAP_TONIC_TO_C"
+local REMOVE_INPUT_SNAP_FX_ON_DISARM_KEY = "REMOVE_INPUT_SNAP_FX_ON_DISARM"
+local AUTO_SNAP_ARMED_TRACK_KEY = "P_EXT:OZ_AUTO_SNAP_ARMED"
+local AUTO_SNAP_SNAP_MODE_TRACK_KEY = "P_EXT:OZ_AUTO_SNAP_SNAP_MODE"
+local MAP_TONIC_TO_C_TRACK_KEY = "P_EXT:OZ_MAP_TONIC_TO_C"
 local RECORD_TIMING_OFFSET_MS_KEY = "RECORD_TIMING_OFFSET_MS"
 local RECORD_TIMING_OFFSET_MS_DEFAULT = 0
 local RECORD_TIMING_OFFSET_MS_MIN = -150
@@ -21,10 +26,11 @@ local GMEM_HEARTBEAT = 3
 local GMEM_RUNNING = 4
 local GMEM_ALLOW_INVERSIONS = 5
 local GMEM_CHORD_ROOT = 6
+local GMEM_SCALE_ROOT = 7
+local GMEM_MAP_TONIC_TO_C = 20
 local GMEM_CHORD_BASE = 8
 local GMEM_SCALE_BASE = 24
 
-local AUTO_SNAP_ARM_KEY_PREFIX = "AUTO_SNAP_ARM_MODE_"
 local AUTO_SNAP_ARM_MODE_OFF = "off"
 local AUTO_SNAP_ARM_MODE_CHORDS = "chords"
 local AUTO_SNAP_ARM_MODE_SCALES = "scales"
@@ -206,15 +212,6 @@ local function find_track_by_guid(guid)
   return nil
 end
 
-local function auto_snap_arm_key_for_track(track)
-  local guid = get_track_guid(track)
-  if not guid or guid == "" then
-    return nil
-  end
-  local safe_guid = guid:gsub("[^%w]", "_")
-  return AUTO_SNAP_ARM_KEY_PREFIX .. safe_guid
-end
-
 local function normalize_auto_snap_arm_mode(mode)
   if mode == "chord_only" then return AUTO_SNAP_ARM_MODE_CHORDS end
   if mode == "scale_only" then return AUTO_SNAP_ARM_MODE_SCALES end
@@ -249,12 +246,56 @@ local function get_override_mode()
   return normalize_override_mode(stored)
 end
 
-local function get_auto_snap_arm_mode_for_track(track)
-  local key = auto_snap_arm_key_for_track(track)
-  if not key then return AUTO_SNAP_ARM_MODE_OFF end
+local function ext_text_to_bool(value, default_value)
+  if value == nil or value == "" then
+    return default_value == true
+  end
+  local normalized = tostring(value):lower()
+  return normalized == "1" or normalized == "true" or normalized == "yes" or normalized == "on"
+end
 
-  local _, stored = reaper.GetProjExtState(0, EXT_SECTION, key)
-  return normalize_auto_snap_arm_mode(stored)
+local function get_remove_input_snap_fx_on_disarm_enabled()
+  local _, stored = reaper.GetProjExtState(0, EXT_SECTION, REMOVE_INPUT_SNAP_FX_ON_DISARM_KEY)
+  return ext_text_to_bool(stored, false)
+end
+
+local function get_auto_snap_armed_for_track(track)
+  if not track then return false end
+  local _, stored = reaper.GetSetMediaTrackInfo_String(track, AUTO_SNAP_ARMED_TRACK_KEY, "", false)
+  return ext_text_to_bool(stored, false)
+end
+
+local function get_auto_snap_snap_mode_for_track(track)
+  if not track then return AUTO_SNAP_ARM_MODE_CHORDS end
+  local _, stored = reaper.GetSetMediaTrackInfo_String(track, AUTO_SNAP_SNAP_MODE_TRACK_KEY, "", false)
+  local mode = normalize_auto_snap_arm_mode(stored)
+  if mode == AUTO_SNAP_ARM_MODE_OFF then
+    return AUTO_SNAP_ARM_MODE_CHORDS
+  end
+  return mode
+end
+
+local function get_auto_snap_arm_mode_for_track(track)
+  if not get_auto_snap_armed_for_track(track) then
+    return AUTO_SNAP_ARM_MODE_OFF
+  end
+  return get_auto_snap_snap_mode_for_track(track)
+end
+
+local function get_map_tonic_to_c_for_track(track)
+  if not track then
+    local _, value = reaper.GetProjExtState(0, EXT_SECTION, MAP_TONIC_TO_C_KEY)
+    return ext_text_to_bool(value, false)
+  end
+
+  local _, stored = reaper.GetSetMediaTrackInfo_String(track, MAP_TONIC_TO_C_TRACK_KEY, "", false)
+  if stored ~= nil and stored ~= "" then
+    return ext_text_to_bool(stored, false)
+  end
+
+  -- Legacy fallback for older projects that only have the project-level setting.
+  local _, value = reaper.GetProjExtState(0, EXT_SECTION, MAP_TONIC_TO_C_KEY)
+  return ext_text_to_bool(value, false)
 end
 
 local function gather_chord_notes(chord_track)
@@ -352,12 +393,28 @@ local function write_shared_sets(runtime_state, chord_set, scale_set, chord_root
   local allow_flag = (allow_inversions == "1" or allow_inversions == "true" or allow_inversions == "yes" or allow_inversions == "on") and 1 or 0
   reaper.gmem_write(GMEM_ALLOW_INVERSIONS, allow_flag)
 
+  local _, scale_root_value = reaper.GetProjExtState(0, EXT_SECTION, "ROOT_PC")
+  local scale_root = tonumber(scale_root_value)
+  if scale_root == nil then
+    scale_root = 0
+  else
+    scale_root = math.floor(scale_root) % 12
+  end
+  reaper.gmem_write(GMEM_SCALE_ROOT, scale_root)
+
+  local _, map_tonic_value = reaper.GetProjExtState(0, EXT_SECTION, MAP_TONIC_TO_C_KEY)
+  local map_tonic_text = tostring(map_tonic_value or ""):lower()
+  local map_tonic_flag = (map_tonic_text == "1" or map_tonic_text == "true" or map_tonic_text == "yes" or map_tonic_text == "on") and 1 or 0
+  reaper.gmem_write(GMEM_MAP_TONIC_TO_C, map_tonic_flag)
+
   reaper.gmem_write(GMEM_RUNNING, 1)
   reaper.gmem_write(GMEM_HEARTBEAT, reaper.time_precise())
 
   runtime_state.last_chord_count = chord_count
   runtime_state.last_scale_count = scale_count
   runtime_state.last_chord_root = chord_root
+  runtime_state.last_scale_root = scale_root
+  runtime_state.last_map_tonic_to_c = map_tonic_flag
 end
 
 local function clear_shared_sets(runtime_state)
@@ -367,6 +424,8 @@ local function clear_shared_sets(runtime_state)
   reaper.gmem_write(GMEM_SCALE_COUNT, 0)
   reaper.gmem_write(GMEM_ALLOW_INVERSIONS, 0)
   reaper.gmem_write(GMEM_CHORD_ROOT, -1)
+  reaper.gmem_write(GMEM_SCALE_ROOT, 0)
+  reaper.gmem_write(GMEM_MAP_TONIC_TO_C, 0)
   for pc = 0, 11 do
     reaper.gmem_write(GMEM_CHORD_BASE + pc, 0)
     reaper.gmem_write(GMEM_SCALE_BASE + pc, 0)
@@ -512,6 +571,21 @@ local function collapse_duplicate_input_fx(track)
   return keep_index, removed
 end
 
+local function remove_input_fx_on_track(track)
+  local indices = list_input_snap_fx_indices(track)
+  if #indices == 0 then
+    return 0
+  end
+
+  local removed = 0
+  for i = #indices, 1, -1 do
+    reaper.TrackFX_Delete(track, indices[i])
+    removed = removed + 1
+  end
+
+  return removed
+end
+
 local function find_input_fx(track)
   local indices = list_input_snap_fx_indices(track)
   return indices[1] or -1
@@ -591,7 +665,7 @@ local function set_fx_param_value(track, fx_index, param_index, target_value)
   return math.abs(readback - target_value) <= 0.51, readback
 end
 
-local function configure_input_fx(track, fx_index, mode_param, enabled)
+local function configure_input_fx(track, fx_index, mode_param, enabled, map_tonic_enabled)
   if fx_index < 0 then return false, nil end
 
   local candidates = candidate_input_fx_indices(track, fx_index)
@@ -605,12 +679,22 @@ local function configure_input_fx(track, fx_index, mode_param, enabled)
     end
 
     local enabled_ok = set_fx_param_value(track, candidate, 1, enabled and 1 or 0)
+    local map_ok = true
+    if map_tonic_enabled ~= nil then
+      -- Tolerate older FX instances that only expose 2 sliders.
+      local ok_map = set_fx_param_value(track, candidate, 2, map_tonic_enabled and 1 or 0)
+      if ok_map == false then
+        map_ok = true
+      else
+        map_ok = ok_map
+      end
+    end
 
     if reaper.TrackFX_SetEnabled then
       reaper.TrackFX_SetEnabled(track, candidate, true)
     end
 
-    if mode_ok and enabled_ok then
+    if mode_ok and enabled_ok and map_ok then
       return true, mode_readback
     end
   end
@@ -626,6 +710,7 @@ local function manage_track_input_fx(chord_track)
   local fx_mode_mismatch = 0
   local fx_config_errors = 0
   local mode_override = get_override_mode()
+  local remove_input_fx_on_disarm = get_remove_input_snap_fx_on_disarm_enabled()
 
   local track_count = reaper.CountTracks(0)
   for i = 0, track_count - 1 do
@@ -637,6 +722,7 @@ local function manage_track_input_fx(chord_track)
       local rec_arm = reaper.GetMediaTrackInfo_Value(track, "I_RECARM")
       local mode = mode_override or get_auto_snap_arm_mode_for_track(track)
       local mode_param = MODE_TO_JSFX_PARAM[mode]
+      local map_tonic_enabled = get_map_tonic_to_c_for_track(track)
 
       local should_enable = (rec_arm >= 1) and (mode_param ~= nil)
       if should_enable then
@@ -645,7 +731,7 @@ local function manage_track_input_fx(chord_track)
           fx_index = ensure_input_fx(track)
         end
         if fx_index >= 0 then
-          local configured, mode_readback = configure_input_fx(track, fx_index, mode_param, true)
+          local configured, mode_readback = configure_input_fx(track, fx_index, mode_param, true, map_tonic_enabled)
           if configured then
             fx_enabled_targets = fx_enabled_targets + 1
             if mode_readback and mode_param and math.abs(mode_readback - mode_param) > 0.51 then
@@ -659,7 +745,11 @@ local function manage_track_input_fx(chord_track)
         end
       else
         if fx_index >= 0 then
-          configure_input_fx(track, fx_index, mode_param or 2, false)
+          if remove_input_fx_on_disarm and mode_param == nil then
+            remove_input_fx_on_track(track)
+          else
+            configure_input_fx(track, fx_index, mode_param or 2, false, map_tonic_enabled)
+          end
         end
       end
     end
@@ -762,6 +852,8 @@ local function main()
     last_chord_count = 0,
     last_scale_count = 0,
     last_chord_root = -1,
+    last_scale_root = 0,
+    last_map_tonic_to_c = 0,
     take_timing_counts = {},
     was_recording = false,
     pending_record_flush = false,
@@ -905,6 +997,9 @@ local function main()
     end
     if fx_config_errors > 0 then
       status_text = status_text .. " | fx_cfg_err=" .. tostring(fx_config_errors)
+    end
+    if runtime_state.last_map_tonic_to_c == 1 then
+      status_text = status_text .. " | tonic_to_c=1(root=" .. tostring(runtime_state.last_scale_root or 0) .. ")"
     end
     if apply_record_timing_offset and timing_changed > 0 then
       status_text = status_text .. " | timing_shifted=" .. tostring(timing_changed)

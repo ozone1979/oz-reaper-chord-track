@@ -10,6 +10,9 @@ INPUT_MANAGER_SNAP_MODE_OVERRIDE_KEY = "SNAP_MODE_OVERRIDE"
 PANEL_SECTION = "OZ_REAPER_CHORD_TRACK_PANEL"
 CUT_OVERLAPS_AFTER_SNAP_KEY = "CUT_OVERLAPS_AFTER_SNAP"
 ALLOW_SNAP_INVERSIONS_KEY = "ALLOW_SNAP_INVERSIONS"
+MAP_TONIC_TO_C_KEY = "MAP_TONIC_TO_C"
+MAP_TONIC_TO_C_TRACK_KEY = "P_EXT:OZ_MAP_TONIC_TO_C"
+REMOVE_INPUT_SNAP_FX_ON_DISARM_KEY = "REMOVE_INPUT_SNAP_FX_ON_DISARM"
 BLOCK_HIGHLIGHT_COLOR_KEY_PREFIX = "BLOCK_HIGHLIGHT_COLOR_RGB_"
 BLOCK_HIGHLIGHT_COLOR_LEGACY_KEY = "BLOCK_HIGHLIGHT_COLOR_RGB"
 POPOUT_INITIAL_TAB_KEY = "POPOUT_INITIAL_TAB"
@@ -43,7 +46,6 @@ AUTO_SNAP_ARM_MODE_SCALES = "scales"
 AUTO_SNAP_ARM_MODE_CHORDS_SCALES = "chords_scales"
 AUTO_SNAP_ARM_MODE_MELODIC_FLOW = "melodic_flow"
 AUTO_SNAP_ARM_MODE_DEFAULT = AUTO_SNAP_ARM_MODE_OFF
-AUTO_SNAP_ARM_KEY_PREFIX = "AUTO_SNAP_ARM_MODE_"
 
 AUTO_SNAP_ARM_MODE_LABELS = {
   [AUTO_SNAP_ARM_MODE_OFF] = "Off",
@@ -103,10 +105,11 @@ INPUT_SNAP_JSFX_RELATIVE_PATH = "Oz Chord Track/Oz Chord Track Input Snap.jsfx"
 
 local INPUT_SNAP_JSFX_SOURCE = [[desc:Oz Chord Track Input Snap
 options:gmem=OZ_REAPER_CHORD_TRACK_INPUT_SNAP
-// OCT_INPUT_SNAP_MAPPING_V3
+// OCT_INPUT_SNAP_MAPPING_V6
 
 slider1:3<0,3,1{Chords,Scales,Chords+Scales,Melodic Flow}>Snap Mode
 slider2:1<0,1,1{Off,On}>Enabled
+slider3:0<0,1,1{Off,On}>Map tonic to C
 
 @init
 
@@ -115,6 +118,8 @@ GMEM_SCALE_COUNT = 2;
 GMEM_RUNNING = 4;
 GMEM_ALLOW_INVERSIONS = 5;
 GMEM_CHORD_ROOT = 6;
+GMEM_SCALE_ROOT = 7;
+GMEM_MAP_TONIC_TO_C = 20;
 GMEM_CHORD_BASE = 8;
 GMEM_SCALE_BASE = 24;
 
@@ -123,6 +128,7 @@ DEGREES = 4128;
 WHITE = 4160;
 CHORD_INTS = 4192;
 SCALE_INTS = 4224;
+TEMPLATE_SCALE_INTS = 4256;
 
 i = 0;
 loop(2048,
@@ -200,6 +206,105 @@ function nearest_allowed_note(note, mode, min_note, max_note) local(best_note, b
     );
 
     best_note >= 0 ? best_note : nearest_allowed_note_unbounded(note, mode);
+  );
+);
+
+function is_white_template_pc(pc) (
+  pc == 0 || pc == 2 || pc == 4 || pc == 5 || pc == 7 || pc == 9 || pc == 11;
+);
+
+function build_tonic_template_scale(root_pc) local(count, offset, pc) (
+  count = 0;
+  offset = 0;
+  loop(12,
+    pc = (root_pc + offset) % 12;
+    gmem[GMEM_SCALE_BASE + pc] >= 0.5 ? (
+      TEMPLATE_SCALE_INTS[count] = offset;
+      count += 1;
+    );
+    offset += 1;
+  );
+  count;
+);
+
+function map_white_template_note_to_scale(note, root_pc, scale_count) local(pc, white_index, degree, base_oct, interval_index, octave_extra, mapped) (
+  pc = normalize_pc(note);
+  white_index =
+    pc == 0 ? 0
+    : pc == 2 ? 1
+    : pc == 4 ? 2
+    : pc == 5 ? 3
+    : pc == 7 ? 4
+    : pc == 9 ? 5
+    : pc == 11 ? 6
+    : -1;
+  (white_index < 0 || scale_count <= 0) ? note : (
+    degree = white_index;
+    base_oct = floor(note / 12) * 12;
+    interval_index = degree % scale_count;
+    octave_extra = floor(degree / scale_count) * 12;
+    mapped = base_oct + root_pc + TEMPLATE_SCALE_INTS[interval_index] + octave_extra;
+    clamp_midi_note(mapped);
+  );
+);
+
+function nearest_tonic_template_note_unbounded(note, root_pc) local(scale_count, best_note, best_distance, best_candidate, candidate, distance, mapped, pc) (
+  scale_count = build_tonic_template_scale(root_pc);
+  scale_count <= 0 ? note : (
+    best_note = -1;
+    best_distance = 999;
+    best_candidate = -1;
+
+    candidate = 0;
+    loop(128,
+      pc = normalize_pc(candidate);
+      is_white_template_pc(pc) ? (
+        mapped = map_white_template_note_to_scale(candidate, root_pc, scale_count);
+        distance = abs(candidate - note);
+        (distance < best_distance || (distance == best_distance && (best_candidate < 0 || candidate < best_candidate))) ? (
+          best_distance = distance;
+          best_candidate = candidate;
+          best_note = mapped;
+        );
+      );
+      candidate += 1;
+    );
+
+    best_note >= 0 ? best_note : note;
+  );
+);
+
+function nearest_tonic_template_note(note, root_pc, min_note, max_note) local(scale_count, best_note, best_distance, best_candidate, candidate, distance, mapped, pc) (
+  min_note < 0 ? min_note = 0;
+  max_note > 127 ? max_note = 127;
+  min_note > max_note ? (
+    nearest_tonic_template_note_unbounded(note, root_pc);
+  ) : (
+    scale_count = build_tonic_template_scale(root_pc);
+    scale_count <= 0 ? note : (
+      best_note = -1;
+      best_distance = 999;
+      best_candidate = -1;
+
+      candidate = 0;
+      loop(128,
+        pc = normalize_pc(candidate);
+        is_white_template_pc(pc) ? (
+          mapped = map_white_template_note_to_scale(candidate, root_pc, scale_count);
+          (mapped >= min_note && mapped <= max_note) ? (
+            distance = abs(candidate - note);
+            (distance < best_distance || (distance == best_distance && (best_candidate < 0 || candidate < best_candidate))) ? (
+              best_distance = distance;
+              best_candidate = candidate;
+              best_note = mapped;
+            );
+          );
+        );
+        candidate += 1;
+      );
+
+      best_note >= 0 ? best_note : nearest_tonic_template_note_unbounded(note, root_pc);
+    );
   );
 );
 
@@ -464,6 +569,7 @@ mode = slider1 | 0;
 mode < 0 ? mode = 0;
 mode > 3 ? mode = 3;
 enabled = slider2 >= 0.5;
+map_tonic_enabled = slider3 >= 0.5;
 
 @block
 running = gmem[GMEM_RUNNING] >= 0.5;
@@ -471,6 +577,7 @@ mode = slider1 | 0;
 mode < 0 ? mode = 0;
 mode > 3 ? mode = 3;
 enabled = slider2 >= 0.5;
+map_tonic_enabled = slider3 >= 0.5;
 
 while (
   midirecv(offset, msg1, msg23)
@@ -491,11 +598,28 @@ while (
         snapped_note = melodic_flow_target(note, min_bound + 1, max_bound - 1, 1);
       );
     ) : (
-      allow_inversions ? (
-        snapped_note = nearest_allowed_note_unbounded(note, mode);
+      scale_map = (mode == 1) && map_tonic_enabled && (gmem[GMEM_SCALE_COUNT] > 0.5);
+      scale_root = normalize_pc(gmem[GMEM_SCALE_ROOT] | 0);
+
+      scale_map ? (
+        allow_inversions ? (
+          snapped_note = nearest_tonic_template_note_unbounded(note, scale_root);
+        ) : (
+          neighboring_snapped_bounds(chan, note);
+          snapped_note = nearest_tonic_template_note(
+            note,
+            scale_root,
+            min_bound + 1,
+            max_bound - 1
+          );
+        );
       ) : (
-        neighboring_snapped_bounds(chan, note);
-        snapped_note = nearest_allowed_note(note, mode, min_bound + 1, max_bound - 1);
+        allow_inversions ? (
+          snapped_note = nearest_allowed_note_unbounded(note, mode);
+        ) : (
+          neighboring_snapped_bounds(chan, note);
+          snapped_note = nearest_allowed_note(note, mode, min_bound + 1, max_bound - 1);
+        );
       );
     );
     map_note[key] = snapped_note;
@@ -1143,24 +1267,68 @@ local function auto_snap_arm_mode_keys_from_guid(guid)
   return AUTO_SNAP_ARM_KEY_PREFIX .. safe_guid
 end
 
-get_auto_snap_arm_mode_for_track = function(track)
-  local guid = get_track_guid(track)
-  local key = auto_snap_arm_mode_keys_from_guid(guid)
-  if not key then return AUTO_SNAP_ARM_MODE_DEFAULT end
-
-  local _, stored = reaper.GetProjExtState(0, EXT_SECTION, key)
-  return normalize_auto_snap_arm_mode(stored)
+-- Get whether a track is armed for snapping (stored in track chunk)
+local function get_auto_snap_armed_for_track(track)
+  if not track then return false end
+  local _, stored = reaper.GetSetMediaTrackInfo_String(track, "P_EXT:OZ_AUTO_SNAP_ARMED", "", false)
+  return stored == "1"
 end
 
-local function set_auto_snap_arm_mode_for_track(track, mode)
+-- Set whether a track is armed (stored in track chunk)
+local function set_auto_snap_armed_for_track(track, armed)
   if not track then return false end
-  local guid = get_track_guid(track)
-  local key = auto_snap_arm_mode_keys_from_guid(guid)
-  if not key then return false end
+  reaper.GetSetMediaTrackInfo_String(track, "P_EXT:OZ_AUTO_SNAP_ARMED", armed and "1" or "0", true)
+  return true
+end
+
+-- Get the stored snap mode for a track (stored in track chunk, ignoring armed state)
+local function get_auto_snap_snap_mode_for_track(track)
+  if not track then return AUTO_SNAP_ARM_MODE_CHORDS end
+  local _, stored = reaper.GetSetMediaTrackInfo_String(track, "P_EXT:OZ_AUTO_SNAP_SNAP_MODE", "", false)
+  local mode = normalize_auto_snap_arm_mode(stored)
+  if mode == AUTO_SNAP_ARM_MODE_OFF or mode == AUTO_SNAP_ARM_MODE_DEFAULT then
+    return AUTO_SNAP_ARM_MODE_CHORDS
+  end
+  return mode
+end
+
+-- Set the snap mode for a track (stored in track chunk)
+local function set_auto_snap_snap_mode_for_track(track, mode)
+  if not track then return false end
 
   local normalized = normalize_auto_snap_arm_mode(mode)
-  reaper.SetProjExtState(0, EXT_SECTION, key, normalized)
+  if normalized == AUTO_SNAP_ARM_MODE_OFF then
+    normalized = AUTO_SNAP_ARM_MODE_CHORDS
+  end
+  reaper.GetSetMediaTrackInfo_String(track, "P_EXT:OZ_AUTO_SNAP_SNAP_MODE", normalized, true)
   return true
+end
+
+-- Get effective arm mode: returns "off" if not armed, otherwise returns stored mode
+get_auto_snap_arm_mode_for_track = function(track)
+  if not track then return AUTO_SNAP_ARM_MODE_DEFAULT end
+
+  if not get_auto_snap_armed_for_track(track) then
+    return AUTO_SNAP_ARM_MODE_OFF
+  end
+
+  return get_auto_snap_snap_mode_for_track(track)
+end
+
+-- Set arm mode: arms the track with the given mode and stores it (in track chunk)
+local function set_auto_snap_arm_mode_for_track(track, mode)
+  if not track then return false end
+
+  local normalized = normalize_auto_snap_arm_mode(mode)
+  
+  if normalized == AUTO_SNAP_ARM_MODE_OFF then
+    -- Disarming: just set armed to false, keep mode stored
+    return set_auto_snap_armed_for_track(track, false)
+  else
+    -- Arming: set armed to true and store the mode
+    set_auto_snap_snap_mode_for_track(track, normalized)
+    return set_auto_snap_armed_for_track(track, true)
+  end
 end
 
 local function get_cut_overlaps_after_snap_enabled()
@@ -1174,6 +1342,52 @@ end
 
 local function set_cut_overlaps_after_snap_enabled(enabled)
   reaper.SetProjExtState(0, EXT_SECTION, CUT_OVERLAPS_AFTER_SNAP_KEY, enabled and "1" or "0")
+end
+
+local function ext_state_text_to_bool(value, default_value)
+  if value == nil or value == "" then
+    return default_value == true
+  end
+  local normalized = tostring(value):lower()
+  return normalized == "1" or normalized == "true" or normalized == "yes" or normalized == "on"
+end
+
+local function get_map_tonic_to_c_enabled()
+  return SnapSettings.get_proj_bool(0, EXT_SECTION, MAP_TONIC_TO_C_KEY, false)
+end
+
+local function set_map_tonic_to_c_enabled(enabled)
+  SnapSettings.set_proj_bool(0, EXT_SECTION, MAP_TONIC_TO_C_KEY, enabled)
+  return enabled == true
+end
+
+local function get_remove_input_snap_fx_on_disarm_enabled()
+  return SnapSettings.get_proj_bool(0, EXT_SECTION, REMOVE_INPUT_SNAP_FX_ON_DISARM_KEY, false)
+end
+
+local function set_remove_input_snap_fx_on_disarm_enabled(enabled)
+  SnapSettings.set_proj_bool(0, EXT_SECTION, REMOVE_INPUT_SNAP_FX_ON_DISARM_KEY, enabled)
+  return enabled == true
+end
+
+local function get_map_tonic_to_c_for_track(track)
+  if not track then
+    return get_map_tonic_to_c_enabled()
+  end
+
+  local _, stored = reaper.GetSetMediaTrackInfo_String(track, MAP_TONIC_TO_C_TRACK_KEY, "", false)
+  if stored == nil or stored == "" then
+    -- Legacy fallback for projects saved before per-track map setting existed.
+    return get_map_tonic_to_c_enabled()
+  end
+
+  return ext_state_text_to_bool(stored, false)
+end
+
+local function set_map_tonic_to_c_for_track(track, enabled)
+  if not track then return false end
+  reaper.GetSetMediaTrackInfo_String(track, MAP_TONIC_TO_C_TRACK_KEY, enabled and "1" or "0", true)
+  return true
 end
 
 local function round_half_away_from_zero(value)
@@ -2182,6 +2396,97 @@ local function nearest_pitch(original_pitch, allowed_pcs)
 
   return original_pitch
 end
+
+local C_MAJOR_TEMPLATE_SET = {
+  [0] = true,
+  [2] = true,
+  [4] = true,
+  [5] = true,
+  [7] = true,
+  [9] = true,
+  [11] = true,
+}
+
+local WHITE_TEMPLATE_INDEX_BY_PC = {
+  [0] = 0,
+  [2] = 1,
+  [4] = 2,
+  [5] = 3,
+  [7] = 4,
+  [9] = 5,
+  [11] = 6,
+}
+
+local function build_scale_interval_list(scale_set, scale_root_pc)
+  local intervals = {}
+  local root = tonumber(scale_root_pc)
+  if root == nil then
+    return intervals
+  end
+
+  root = math.floor(root) % 12
+  for offset = 0, 11 do
+    if scale_set and scale_set[(root + offset) % 12] then
+      intervals[#intervals + 1] = offset
+    end
+  end
+
+  return intervals
+end
+
+local function map_white_template_pitch_to_scale(template_pitch, scale_intervals, scale_root_pc)
+  local root = tonumber(scale_root_pc)
+  if root == nil or not scale_intervals or #scale_intervals == 0 then
+    return nil
+  end
+
+  local degree = WHITE_TEMPLATE_INDEX_BY_PC[template_pitch % 12]
+  if degree == nil then
+    return nil
+  end
+
+  local base_oct = math.floor(template_pitch / 12) * 12
+  local interval_index = (degree % #scale_intervals) + 1
+  local octave_extra = math.floor(degree / #scale_intervals) * 12
+  local mapped = base_oct + (math.floor(root) % 12) + scale_intervals[interval_index] + octave_extra
+
+  if mapped < 0 then return 0 end
+  if mapped > 127 then return 127 end
+  return mapped
+end
+
+local function nearest_tonic_mapped_pitch(original_pitch, scale_intervals, scale_root_pc, min_output_pitch, max_output_pitch)
+  if not scale_intervals or #scale_intervals == 0 then
+    return original_pitch
+  end
+
+  local min_pitch = min_output_pitch and math.max(0, math.floor(min_output_pitch)) or 0
+  local max_pitch = max_output_pitch and math.min(127, math.floor(max_output_pitch)) or 127
+  if min_pitch > max_pitch then
+    min_pitch, max_pitch = 0, 127
+  end
+
+  local best_output = nil
+  local best_distance = math.huge
+  local best_candidate = nil
+
+  for candidate = 0, 127 do
+    if C_MAJOR_TEMPLATE_SET[candidate % 12] then
+      local mapped = map_white_template_pitch_to_scale(candidate, scale_intervals, scale_root_pc)
+      if mapped and mapped >= min_pitch and mapped <= max_pitch then
+        local distance = math.abs(candidate - original_pitch)
+        if distance < best_distance or (distance == best_distance and (best_candidate == nil or candidate < best_candidate)) then
+          best_distance = distance
+          best_candidate = candidate
+          best_output = mapped
+        end
+      end
+    end
+  end
+
+  return best_output or original_pitch
+end
+
 local function melodic_flow_pitch(original_pitch, chord_set, scale_set, chord_root_pc)
   local root_pc = nil
   if type(chord_root_pc) == "number" then
@@ -2459,7 +2764,7 @@ local function truncate_overlapping_notes_in_take(take)
   return changed
 end
 
-local function snap_take_notes(take, chord_notes, scale_set, mode, start_note_index, cut_overlaps)
+local function snap_take_notes(take, chord_notes, scale_set, scale_root_pc, mode, start_note_index, cut_overlaps, map_tonic_to_c)
   local _, note_count = reaper.MIDI_CountEvts(take)
   if note_count == 0 then return 0, 0, note_count end
 
@@ -2473,6 +2778,18 @@ local function snap_take_notes(take, chord_notes, scale_set, mode, start_note_in
   local processed = 0
   local allow_inversions = SnapSettings.get_proj_bool(0, EXT_SECTION, ALLOW_SNAP_INVERSIONS_KEY, false)
   local normalized_mode = normalize_snap_mode(mode)
+  local tonic_map_enabled = map_tonic_to_c
+  if tonic_map_enabled == nil then
+    tonic_map_enabled = get_map_tonic_to_c_enabled()
+  end
+  local tonic_template_intervals = nil
+  if tonic_map_enabled and normalized_mode == SNAP_MODE_SCALE_ONLY and set_count(scale_set) > 0 and type(scale_root_pc) == "number" then
+    tonic_template_intervals = build_scale_interval_list(scale_set, scale_root_pc)
+    if #tonic_template_intervals == 0 then
+      tonic_template_intervals = nil
+    end
+  end
+
   local enforce_non_inverted = not allow_inversions
   local current_group_start_ppq = nil
   local current_group_channel = nil
@@ -2495,11 +2812,18 @@ local function snap_take_notes(take, chord_notes, scale_set, mode, start_note_in
         if normalized_mode == SNAP_MODE_MELODIC_FLOW then
           snapped_pitch = melodic_flow_pitch(pitch, chord_set, scale_set, chord_root_pc)
         end
+        if snapped_pitch == nil and tonic_template_intervals then
+          local min_output_pitch = nil
+          if enforce_non_inverted and last_group_snapped_pitch ~= nil then
+            min_output_pitch = math.max(0, math.floor(last_group_snapped_pitch))
+          end
+          snapped_pitch = nearest_tonic_mapped_pitch(pitch, tonic_template_intervals, scale_root_pc, min_output_pitch, 127)
+        end
         if snapped_pitch == nil then
           snapped_pitch = nearest_pitch(pitch, allowed_set)
         end
 
-        if enforce_non_inverted and last_group_snapped_pitch ~= nil and snapped_pitch < last_group_snapped_pitch then
+        if (not tonic_template_intervals) and enforce_non_inverted and last_group_snapped_pitch ~= nil and snapped_pitch < last_group_snapped_pitch then
           local floor_pitch = math.max(0, math.floor(last_group_snapped_pitch))
           local non_inverted = nil
           local best_distance = math.huge
@@ -2602,11 +2926,27 @@ end
 local function gather_target_takes(chord_track)
   local takes = {}
 
+  local function append_take_entry(take)
+    if not take or not reaper.TakeIsMIDI(take) then
+      return
+    end
+
+    local track = nil
+    if reaper.GetMediaItemTake_Track then
+      track = reaper.GetMediaItemTake_Track(take)
+    end
+
+    takes[#takes + 1] = {
+      take = take,
+      track = track,
+    }
+  end
+
   local midi_editor = reaper.MIDIEditor_GetActive()
   if midi_editor then
     local take = reaper.MIDIEditor_GetTake(midi_editor)
     if take and reaper.TakeIsMIDI(take) then
-      takes[#takes + 1] = take
+      append_take_entry(take)
       return takes, "active MIDI editor take"
     end
   end
@@ -2615,9 +2955,7 @@ local function gather_target_takes(chord_track)
   for i = 0, selected_items - 1 do
     local item = reaper.GetSelectedMediaItem(0, i)
     local take = reaper.GetActiveTake(item)
-    if take and reaper.TakeIsMIDI(take) then
-      takes[#takes + 1] = take
-    end
+    append_take_entry(take)
   end
 
   if #takes > 0 then
@@ -2632,9 +2970,7 @@ local function gather_target_takes(chord_track)
       for item_index = 0, item_count - 1 do
         local item = reaper.GetTrackMediaItem(track, item_index)
         local take = reaper.GetActiveTake(item)
-        if take and reaper.TakeIsMIDI(take) then
-          takes[#takes + 1] = take
-        end
+        append_take_entry(take)
       end
     end
   end
@@ -2660,6 +2996,96 @@ local function load_chord_track_from_state()
   return chord_track, state, nil
 end
 
+
+-- Update snap mode for selected tracks without affecting armed state (used when snap method is selected in UI)
+local function update_snap_mode_for_selected_tracks(snap_mode)
+  if not snap_mode then return 0 end
+  
+  local normalized = normalize_auto_snap_arm_mode(snap_mode)
+  if normalized == AUTO_SNAP_ARM_MODE_OFF then
+    return 0
+  end
+  
+  local selected_count = reaper.CountSelectedTracks(0)
+  local chord_track = load_chord_track_from_state()
+  local updated = 0
+  
+  for i = 0, selected_count - 1 do
+    local track = reaper.GetSelectedTrack(0, i)
+    if track and track ~= chord_track then
+      if set_auto_snap_snap_mode_for_track(track, normalized) then
+        updated = updated + 1
+      end
+    end
+  end
+  
+  return updated
+end
+
+local function update_map_tonic_to_c_for_selected_tracks(enabled)
+  local selected_count = reaper.CountSelectedTracks(0)
+  local chord_track = load_chord_track_from_state()
+  local updated = 0
+
+  for i = 0, selected_count - 1 do
+    local track = reaper.GetSelectedTrack(0, i)
+    if track and track ~= chord_track then
+      if set_map_tonic_to_c_for_track(track, enabled) then
+        updated = updated + 1
+      end
+    end
+  end
+
+  return updated
+end
+
+-- Load snap mode from the first selected target track (not chord track)
+local function load_snap_mode_from_selected_track()
+  local chord_track = load_chord_track_from_state()
+  local selected_count = reaper.CountSelectedTracks(0)
+  
+  for i = 0, selected_count - 1 do
+    local track = reaper.GetSelectedTrack(0, i)
+    if track and track ~= chord_track then
+      local mode = get_auto_snap_snap_mode_for_track(track)
+      return normalize_auto_snap_arm_mode(mode)
+    end
+  end
+  
+  return nil
+end
+
+local function load_map_tonic_to_c_from_selected_track()
+  local chord_track = load_chord_track_from_state()
+  local selected_count = reaper.CountSelectedTracks(0)
+
+  for i = 0, selected_count - 1 do
+    local track = reaper.GetSelectedTrack(0, i)
+    if track and track ~= chord_track then
+      return get_map_tonic_to_c_for_track(track)
+    end
+  end
+
+  return nil
+end
+
+-- Update the UI snap mode display based on the currently selected track
+local function refresh_ui_snap_mode_from_selection(ui_state)
+  if not ui_state then return end
+
+  local loaded_mode = load_snap_mode_from_selected_track()
+  if loaded_mode and loaded_mode ~= AUTO_SNAP_ARM_MODE_OFF then
+    local snap_mode = auto_snap_arm_mode_to_snap_mode(loaded_mode)
+    if snap_mode then
+      ui_state.new_note_snap_mode = snap_mode
+    end
+  end
+
+  local loaded_map_tonic = load_map_tonic_to_c_from_selected_track()
+  if loaded_map_tonic ~= nil then
+    ui_state.map_tonic_to_c = loaded_map_tonic
+  end
+end
 local function set_chord_track(track)
   if not track then
     return false, "Select the MIDI chord source track first."
@@ -2748,7 +3174,11 @@ local function snap_selected_midi_internal(mode)
   local cut_overlaps = get_cut_overlaps_after_snap_enabled()
 
   for i = 1, #takes do
-    local changed, processed = snap_take_notes(takes[i], chord_notes, state.scale_pcs, snap_mode, nil, cut_overlaps)
+    local take_entry = takes[i]
+    local take = take_entry.take
+    local target_track = take_entry.track
+    local map_tonic_to_c = get_map_tonic_to_c_for_track(target_track)
+    local changed, processed = snap_take_notes(take, chord_notes, state.scale_pcs, state.root_pc, snap_mode, nil, cut_overlaps, map_tonic_to_c)
     changed_total = changed_total + changed
     processed_total = processed_total + processed
   end
@@ -2911,9 +3341,10 @@ local function snap_track_targets_internal(targets, chord_notes, state, undo_lab
   for i = 1, #targets do
     local target = targets[i]
     track_count = track_count + 1
+    local map_tonic_to_c = get_map_tonic_to_c_for_track(target.track)
 
     for_each_midi_take_on_track(target.track, function(take)
-      local changed, processed = snap_take_notes(take, chord_notes, state.scale_pcs, target.snap_mode, nil, cut_overlaps)
+      local changed, processed = snap_take_notes(take, chord_notes, state.scale_pcs, state.root_pc, target.snap_mode, nil, cut_overlaps, map_tonic_to_c)
       take_count = take_count + 1
       processed_total = processed_total + processed
       changed_total = changed_total + changed
@@ -3458,6 +3889,7 @@ local function gather_live_takes(chord_track, mode, include_track_guids, include
       end
 
       if snap_mode then
+        local map_tonic_to_c = get_map_tonic_to_c_for_track(track)
         if track_guid and track_guid ~= "" then
           target_guids[track_guid] = true
           target_modes[track_guid] = snap_mode
@@ -3467,6 +3899,7 @@ local function gather_live_takes(chord_track, mode, include_track_guids, include
           takes[#takes + 1] = {
             take = take,
             snap_mode = snap_mode,
+            map_tonic_to_c = map_tonic_to_c,
           }
         end)
       end
@@ -3617,6 +4050,7 @@ local function live_loop()
   for i = 1, #take_entries do
     local take = take_entries[i].take
     local snap_mode = take_entries[i].snap_mode
+    local map_tonic_to_c = take_entries[i].map_tonic_to_c
     local id = take_id(take)
     seen_take_ids[id] = true
 
@@ -3629,10 +4063,10 @@ local function live_loop()
       from_index = 0
     end
 
-    local changed, processed, current_count = snap_take_notes(take, live_state.chord_notes, state.scale_pcs, snap_mode, from_index, false)
+    local changed, processed, current_count = snap_take_notes(take, live_state.chord_notes, state.scale_pcs, state.root_pc, snap_mode, from_index, false, map_tonic_to_c)
 
     if is_recording and (not should_flush_after_record) and current_count > last_count and last_count > 0 and from_index > 0 then
-      local rescue_changed, rescue_processed = snap_take_notes(take, live_state.chord_notes, state.scale_pcs, snap_mode, 0, false)
+      local rescue_changed, rescue_processed = snap_take_notes(take, live_state.chord_notes, state.scale_pcs, state.root_pc, snap_mode, 0, false, map_tonic_to_c)
       changed = changed + (tonumber(rescue_changed) or 0)
       processed_total = processed_total + (tonumber(rescue_processed) or 0)
     end
@@ -3664,11 +4098,12 @@ local function live_loop()
     for guid, snap_mode in pairs(live_state.record_target_modes or {}) do
       local track = find_track_by_guid(guid)
       if track and track ~= chord_track then
+        local map_tonic_to_c = get_map_tonic_to_c_for_track(track)
         for_each_midi_take_on_track(track, function(take)
           local id = take_id(take)
           seen_take_ids[id] = true
 
-          local changed, processed, current_count = snap_take_notes(take, live_state.chord_notes, state.scale_pcs, snap_mode, 0, false)
+          local changed, processed, current_count = snap_take_notes(take, live_state.chord_notes, state.scale_pcs, state.root_pc, snap_mode, 0, false, map_tonic_to_c)
 
           local timing_last_count = tonumber(live_state.take_timing_counts[id])
           if timing_last_count == nil then
@@ -3977,8 +4412,8 @@ local function is_legacy_input_snap_jsfx(path)
     return true
   end
 
-  -- Reinstall when Melodic Flow mapping schema changes.
-  if content:find("OCT_INPUT_SNAP_MAPPING_V3", 1, true) == nil then
+  -- Reinstall when mapping schema changes.
+  if content:find("OCT_INPUT_SNAP_MAPPING_V6", 1, true) == nil then
     return true
   end
 
@@ -4122,6 +4557,8 @@ function OzChordTrack.run_dockable_panel()
   local ui_state = {
     prev_lmb = false,
     prev_rmb = false,
+    scrollbar_drag_tab = nil,
+    scrollbar_drag_offset = 0,
     status_text = "",
     status_expires = 0,
     last_dock_state = dock_state,
@@ -4132,6 +4569,8 @@ function OzChordTrack.run_dockable_panel()
     compact_mode = stored_compact_mode,
     cut_overlaps_after_snap = stored_cut_overlaps,
     allow_snap_inversions = SnapSettings.get_proj_bool(0, EXT_SECTION, ALLOW_SNAP_INVERSIONS_KEY, false),
+    map_tonic_to_c = get_map_tonic_to_c_enabled(),
+    remove_input_snap_fx_on_disarm = get_remove_input_snap_fx_on_disarm_enabled(),
     timeline_calibration_px = stored_timeline_calibration,
     record_timing_offset_ms = stored_record_timing_offset,
     new_note_snap_pipeline_mode = get_new_note_snap_pipeline_mode(),
@@ -4378,6 +4817,9 @@ function OzChordTrack.run_dockable_panel()
 
     ui_state.new_note_snap_mode = set_new_note_snap_mode_runtime(normalized_snap_mode, ui_state.new_note_snap_pipeline_mode)
 
+    -- Save snap mode to all selected tracks' chunk data (regardless of armed state)
+    local saved_count = update_snap_mode_for_selected_tracks(auto_mode)
+
     local arming = selected_tracks_follow_arming_state(infos)
     if not arming.has_target then
       set_status("No target tracks selected.")
@@ -4385,7 +4827,8 @@ function OzChordTrack.run_dockable_panel()
     end
 
     if arming.all_disarmed then
-      set_status("Snap method set to " .. snap_mode_to_label(normalized_snap_mode) .. ". Arm selected tracks to start snapping.")
+      local saved_text = (saved_count > 0) and (" Saved to " .. tostring(saved_count) .. " track(s).") or ""
+      set_status("Snap method set to " .. snap_mode_to_label(normalized_snap_mode) .. ". Arm selected tracks to start snapping." .. saved_text)
       return true
     end
 
@@ -4997,10 +5440,15 @@ function OzChordTrack.run_dockable_panel()
     local right_click = rmb_down and not ui_state.prev_rmb
     ui_state.prev_lmb = lmb_down
     ui_state.prev_rmb = rmb_down
+    if not lmb_down then
+      ui_state.scrollbar_drag_tab = nil
+      ui_state.scrollbar_drag_offset = 0
+    end
 
     local current_state = load_state()
     ui_state.cut_overlaps_after_snap = get_cut_overlaps_after_snap_enabled()
     ui_state.allow_snap_inversions = SnapSettings.get_proj_bool(0, EXT_SECTION, ALLOW_SNAP_INVERSIONS_KEY, false)
+    ui_state.remove_input_snap_fx_on_disarm = get_remove_input_snap_fx_on_disarm_enabled()
     ui_state.block_theme = normalize_chord_block_theme(reaper.GetExtState(PANEL_SECTION, "BLOCK_THEME"))
     ui_state.timeline_calibration_px = get_timeline_calibration_px()
     ui_state.record_timing_offset_ms = get_record_timing_offset_ms()
@@ -5009,6 +5457,9 @@ function OzChordTrack.run_dockable_panel()
     local chord_track = find_track_by_guid(current_state.track_guid)
     local chord_track_name = chord_track and get_track_name(chord_track) or "(not set)"
     local auto_snap_arm_summary, selected_infos = selected_tracks_auto_snap_arm_summary(chord_track)
+
+    -- Refresh snap mode UI from selected track's stored mode
+    refresh_ui_snap_mode_from_selection(ui_state)
     local scale_notes = pitch_set_to_note_names(current_state.scale_pcs)
     if scale_notes == "" then scale_notes = "(none)" end
 
@@ -5761,11 +6212,28 @@ function OzChordTrack.run_dockable_panel()
           apply_selected_mode(selected_id)
         end)
 
+        if effective_snap_mode == SNAP_MODE_SCALE_ONLY then
+          spacer(density.spacer_h)
+          toggle_switch_row("Map tonic to C", ui_state.map_tonic_to_c and "on" or "off", function()
+            local next_value = not ui_state.map_tonic_to_c
+            local updated = update_map_tonic_to_c_for_selected_tracks(next_value)
+            if updated <= 0 then
+              set_status("No target tracks selected.")
+              return
+            end
+            -- Keep legacy project flag in sync for older input-snap FX variants.
+            set_map_tonic_to_c_enabled(next_value)
+            ui_state.map_tonic_to_c = next_value
+            set_status(SnapSettings.toggle_status("Map tonic to C", next_value) .. " Saved to " .. tostring(updated) .. " track(s).")
+          end)
+        end
+
         spacer(density.spacer_h)
         label("Runtime", density.heading_font, 0.95, 0.95, 0.98)
         label(runtime_label, density.body_font, runtime_r, runtime_g, runtime_b)
         label(runtime_detail, density.meta_font, runtime_r, runtime_g, runtime_b)
         label("Current method: " .. snap_mode_to_label(effective_snap_mode), density.meta_font, 0.80, 0.80, 0.84)
+        label("Disarm FX cleanup: " .. (ui_state.remove_input_snap_fx_on_disarm and "On" or "Off"), density.meta_font, 0.80, 0.80, 0.84)
 
         spacer(density.spacer_h)
         label("Voicing", density.heading_font, 0.95, 0.95, 0.98)
@@ -5784,6 +6252,12 @@ function OzChordTrack.run_dockable_panel()
 
         spacer(density.spacer_h)
         label("Input Snap Utilities", density.heading_font, 0.95, 0.95, 0.98)
+        toggle_switch_row("Remove input snap FX on disarm", ui_state.remove_input_snap_fx_on_disarm and "on" or "off", function()
+          local next_value = not ui_state.remove_input_snap_fx_on_disarm
+          set_remove_input_snap_fx_on_disarm_enabled(next_value)
+          ui_state.remove_input_snap_fx_on_disarm = next_value
+          set_status(SnapSettings.toggle_status("Remove input snap FX on disarm", next_value))
+        end)
         button_row("Ensure input snap JSFX installed", run_ensure_input_snap_jsfx_action)
         button_row("Repair input snap FX instances", run_repair_input_snap_fx_action)
 
@@ -5794,22 +6268,7 @@ function OzChordTrack.run_dockable_panel()
         label("Chord Block Theme", density.heading_font, 0.95, 0.95, 0.98)
         label("Current: " .. chord_block_theme_to_display_label(ui_state.block_theme), density.body_font)
         label("Resolved: " .. chord_block_theme_to_label(resolved), density.meta_font, 0.80, 0.80, 0.84)
-
-        local themes = {
-          CHORD_BLOCK_THEME_AUTO,
-          CHORD_BLOCK_THEME_BLUE,
-          CHORD_BLOCK_THEME_PURPLE,
-          CHORD_BLOCK_THEME_NEUTRAL,
-        }
-        for i = 1, #themes do
-          local theme = themes[i]
-          local marker = (ui_state.block_theme == theme) and "(●) " or "(○) "
-          button_row(marker .. chord_block_theme_to_label(theme), function()
-            ui_state.block_theme = normalize_chord_block_theme(theme)
-            reaper.SetExtState(PANEL_SECTION, "BLOCK_THEME", ui_state.block_theme, true)
-            set_status(format_theme_set_status(ui_state.block_theme))
-          end)
-        end
+        menu_button_row("Theme menu ▼", apply_block_theme_menu)
 
         spacer(density.spacer_h)
         label("Highlight Color", density.heading_font, 0.95, 0.95, 0.98)
@@ -5833,8 +6292,6 @@ function OzChordTrack.run_dockable_panel()
         label("Timeline Align Offset: " .. timeline_calibration_to_label(ui_state.timeline_calibration_px), density.body_font)
         menu_button_row("Set timeline align offset (coarse/fine) ▼", apply_timeline_calibration_menu)
 
-        spacer(density.spacer_h)
-        menu_button_row("Theme menu ▼", apply_block_theme_menu)
       end
 
       return virtual_y + 8
@@ -5852,22 +6309,92 @@ function OzChordTrack.run_dockable_panel()
       end
     end
 
-    local function draw_scrollbar(area_x, area_y, area_w, area_h, content_total, max_scroll, tab_id)
+    local function scrollbar_geometry(area_x, area_y, area_w, area_h, content_total, max_scroll, tab_id)
       if max_scroll <= 0 then
-        return
+        return nil
+      end
+
+      local track_h = area_h - 12
+      if track_h <= 0 then
+        return nil
       end
 
       local scroll = ui_state.tab_scroll[tab_id] or 0
       local track_x = area_x + area_w - 8
       local track_y = area_y + 6
-      local track_h = area_h - 12
-      gfx.set(0.16, 0.16, 0.17, 1)
-      gfx.rect(track_x, track_y, 4, track_h, 1)
+      local track_w = 4
+      local thumb_h = math.max(24, (area_h / math.max(area_h, content_total)) * track_h)
+      if thumb_h > track_h then
+        thumb_h = track_h
+      end
 
-      local thumb_h = math.max(24, (area_h / content_total) * track_h)
-      local thumb_y = track_y + ((scroll / max_scroll) * (track_h - thumb_h))
+      local thumb_range = math.max(1, track_h - thumb_h)
+      local thumb_y = track_y + ((scroll / max_scroll) * thumb_range)
+
+      return {
+        tab_id = tab_id,
+        max_scroll = max_scroll,
+        track_x = track_x,
+        track_y = track_y,
+        track_w = track_w,
+        track_h = track_h,
+        thumb_y = thumb_y,
+        thumb_h = thumb_h,
+        hit_x = track_x - 3,
+        hit_w = track_w + 6,
+      }
+    end
+
+    local function apply_scrollbar_input(geom, tab_id, lmb_down_value, click_value)
+      if ui_state.scrollbar_drag_tab == tab_id and (not lmb_down_value or not geom) then
+        ui_state.scrollbar_drag_tab = nil
+        ui_state.scrollbar_drag_offset = 0
+      end
+
+      if not geom then
+        return false, false
+      end
+
+      local mouse_on_track = point_in_rect(gfx.mouse_x, gfx.mouse_y, geom.hit_x, geom.track_y, geom.hit_w, geom.track_h)
+      local mouse_on_thumb = point_in_rect(gfx.mouse_x, gfx.mouse_y, geom.hit_x, geom.thumb_y, geom.hit_w, geom.thumb_h)
+      local consumed = false
+
+      if click_value and mouse_on_track then
+        ui_state.scrollbar_drag_tab = tab_id
+        if mouse_on_thumb then
+          ui_state.scrollbar_drag_offset = gfx.mouse_y - geom.thumb_y
+        else
+          ui_state.scrollbar_drag_offset = geom.thumb_h * 0.5
+        end
+        consumed = true
+      end
+
+      if ui_state.scrollbar_drag_tab == tab_id and lmb_down_value then
+        local thumb_range = math.max(1, geom.track_h - geom.thumb_h)
+        local drag_offset = ui_state.scrollbar_drag_offset or (geom.thumb_h * 0.5)
+        local thumb_top = gfx.mouse_y - drag_offset
+        local t = (thumb_top - geom.track_y) / thumb_range
+        if t < 0 then
+          t = 0
+        elseif t > 1 then
+          t = 1
+        end
+        ui_state.tab_scroll[tab_id] = geom.max_scroll * t
+        consumed = true
+      end
+
+      return consumed, mouse_on_track
+    end
+
+    local function draw_scrollbar(geom)
+      if not geom then
+        return
+      end
+
+      gfx.set(0.16, 0.16, 0.17, 1)
+      gfx.rect(geom.track_x, geom.track_y, geom.track_w, geom.track_h, 1)
       gfx.set(0.52, 0.52, 0.57, 1)
-      gfx.rect(track_x, thumb_y, 4, thumb_h, 1)
+      gfx.rect(geom.track_x, geom.thumb_y, geom.track_w, geom.thumb_h, 1)
     end
 
     local workspace_x = x + 1
@@ -5990,6 +6517,21 @@ function OzChordTrack.run_dockable_panel()
       lane_w = workspace_w
     end
 
+    -- For stacked layouts (lane below content), apply horizontal alignment so the
+    -- chord blocks lane matches the REAPER arrange view's pixel width and position.
+    if lane_y > workspace_y then
+      local view_len_align = arrange_end - arrange_start
+      local hzoom_align = tonumber(reaper.GetHZoomLevel()) or 0
+      if view_len_align > 0 and hzoom_align > 0 then
+        local arrange_content_px = math.floor(view_len_align * hzoom_align + 0.5)
+        if arrange_content_px > 0 then
+          local aligned_w = math.min(workspace_w, math.max(80, arrange_content_px))
+          lane_x = workspace_x + math.max(0, workspace_w - aligned_w)
+          lane_w = workspace_w - (lane_x - workspace_x)
+        end
+      end
+    end
+
     if content_w < 80 then content_w = 80 end
     if content_h < 30 then content_h = 30 end
     if lane_w < 80 then lane_w = 80 end
@@ -6012,9 +6554,14 @@ function OzChordTrack.run_dockable_panel()
       ui_state.tab_scroll[main_tab_id] = scroll
     end
 
+    local main_scrollbar_geom = scrollbar_geometry(content_x, content_y, content_w, content_h, main_content_total, main_max_scroll, main_tab_id)
+    local scrollbar_consumed_click, scrollbar_hovered = apply_scrollbar_input(main_scrollbar_geom, main_tab_id, lmb_down, click)
+
     clamp_scroll(main_tab_id, main_max_scroll)
-    render_tab_content(main_tab_id, content_x, content_y, content_w, content_h, true, click, main_density)
-    draw_scrollbar(content_x, content_y, content_w, content_h, main_content_total, main_max_scroll, main_tab_id)
+    main_scrollbar_geom = scrollbar_geometry(content_x, content_y, content_w, content_h, main_content_total, main_max_scroll, main_tab_id)
+    local allow_main_click = click and not scrollbar_consumed_click and not scrollbar_hovered
+    render_tab_content(main_tab_id, content_x, content_y, content_w, content_h, true, allow_main_click, main_density)
+    draw_scrollbar(main_scrollbar_geom)
 
     local content_bottom = content_y + content_h
     local panel_bottom = panel_y + panel_h
@@ -6114,12 +6661,16 @@ function OzChordTrack.run_compact_popout_panel()
 
   local ui_state = {
     prev_lmb = false,
+    scrollbar_drag_tab = nil,
+    scrollbar_drag_offset = 0,
     status_text = "",
     status_expires = 0,
     active_tab = (initial_tab == "follow") and "snap" or initial_tab,
     tab_scroll = { snap = 0, theme = 0 },
     cut_overlaps_after_snap = get_cut_overlaps_after_snap_enabled(),
     allow_snap_inversions = SnapSettings.get_proj_bool(0, EXT_SECTION, ALLOW_SNAP_INVERSIONS_KEY, false),
+    map_tonic_to_c = get_map_tonic_to_c_enabled(),
+    remove_input_snap_fx_on_disarm = get_remove_input_snap_fx_on_disarm_enabled(),
     block_theme = normalize_chord_block_theme(reaper.GetExtState(PANEL_SECTION, "BLOCK_THEME")),
     timeline_calibration_px = get_timeline_calibration_px(),
     record_timing_offset_ms = get_record_timing_offset_ms(),
@@ -6379,6 +6930,9 @@ function OzChordTrack.run_compact_popout_panel()
 
     ui_state.new_note_snap_mode = set_new_note_snap_mode_runtime(normalized_snap_mode, ui_state.new_note_snap_pipeline_mode)
 
+    -- Save snap mode to all selected tracks' chunk data (regardless of armed state)
+    local saved_count = update_snap_mode_for_selected_tracks(auto_mode)
+
     local arming = selected_tracks_follow_arming_state(infos)
     if not arming.has_target then
       set_status("No target tracks selected.")
@@ -6386,7 +6940,8 @@ function OzChordTrack.run_compact_popout_panel()
     end
 
     if arming.all_disarmed then
-      set_status("Snap method set to " .. snap_mode_to_label(normalized_snap_mode) .. ". Arm selected tracks to start snapping.")
+      local saved_text = (saved_count > 0) and (" Saved to " .. tostring(saved_count) .. " track(s).") or ""
+      set_status("Snap method set to " .. snap_mode_to_label(normalized_snap_mode) .. ". Arm selected tracks to start snapping." .. saved_text)
       return true
     end
 
@@ -6520,10 +7075,15 @@ function OzChordTrack.run_compact_popout_panel()
     local lmb_down = (gfx.mouse_cap & 1) == 1
     local click = lmb_down and not ui_state.prev_lmb
     ui_state.prev_lmb = lmb_down
+    if not lmb_down then
+      ui_state.scrollbar_drag_tab = nil
+      ui_state.scrollbar_drag_offset = 0
+    end
 
     local current_state = load_state()
     ui_state.cut_overlaps_after_snap = get_cut_overlaps_after_snap_enabled()
     ui_state.allow_snap_inversions = SnapSettings.get_proj_bool(0, EXT_SECTION, ALLOW_SNAP_INVERSIONS_KEY, false)
+    ui_state.remove_input_snap_fx_on_disarm = get_remove_input_snap_fx_on_disarm_enabled()
     local chord_track = find_track_by_guid(current_state.track_guid)
     local _, selected_infos = selected_tracks_auto_snap_arm_summary(chord_track)
     ui_state.block_theme = normalize_chord_block_theme(reaper.GetExtState(PANEL_SECTION, "BLOCK_THEME"))
@@ -6531,6 +7091,9 @@ function OzChordTrack.run_compact_popout_panel()
     ui_state.record_timing_offset_ms = get_record_timing_offset_ms()
     ui_state.new_note_snap_pipeline_mode = get_new_note_snap_pipeline_mode()
     ui_state.new_note_snap_mode = get_new_note_snap_mode()
+
+    -- Refresh snap mode UI from selected track's stored mode
+    refresh_ui_snap_mode_from_selection(ui_state)
 
     gfx.set(0.14, 0.14, 0.15, 1)
     gfx.rect(0, 0, gfx.w, gfx.h, 1)
@@ -6597,10 +7160,15 @@ function OzChordTrack.run_compact_popout_panel()
     local content_y = tab_y + tab_h + 6
     local content_w = w - 2
     local content_h = (y + h) - content_y - 12
-    if content_h < 90 then content_h = 90 end
+    if content_h < 60 then content_h = 60 end
 
     local dense = (content_w < 560) or (content_h < 320)
     local very_dense = (content_w < 430) or (content_h < 250)
+    local status_h = very_dense and 18 or (dense and 20 or 22)
+    local status_y = (y + h) - status_h - 1
+    content_h = status_y - content_y - 8
+    if content_h < 60 then content_h = 60 end
+
     local heading_font = very_dense and 14 or (dense and 15 or 17)
     local body_font = very_dense and 12 or (dense and 13 or 14)
     local meta_font = very_dense and 11 or (dense and 12 or 13)
@@ -6650,6 +7218,8 @@ function OzChordTrack.run_compact_popout_panel()
       apply_selected_tracks_follow_mode_from_snap_mode(mapped_snap_mode, selected_infos)
     end
 
+    local content_click = click
+
     local function render_tab(do_draw)
       local scroll = ui_state.tab_scroll[ui_state.active_tab] or 0
       local virtual_y = 8
@@ -6683,7 +7253,7 @@ function OzChordTrack.run_compact_popout_panel()
         row(button_h + button_row_gap, function(draw_y)
           gfx.setfont(1, "Segoe UI", button_font)
           local button_text = fit_text_to_width(text, content_w - 26, button_font)
-          local can_click = click and do_draw and point_in_rect(gfx.mouse_x, gfx.mouse_y, content_x, content_y, content_w, content_h)
+          local can_click = content_click and do_draw and point_in_rect(gfx.mouse_x, gfx.mouse_y, content_x, content_y, content_w, content_h)
           if draw_button(content_x + 8, draw_y, content_w - 16, button_h, button_text, can_click) then
             callback(draw_y)
           end
@@ -6694,7 +7264,7 @@ function OzChordTrack.run_compact_popout_panel()
         row(button_h + button_row_gap, function(draw_y)
           gfx.setfont(1, "Segoe UI", button_font)
           local button_text = fit_text_to_width(text, content_w - 26, button_font)
-          local can_click = click and do_draw and point_in_rect(gfx.mouse_x, gfx.mouse_y, content_x, content_y, content_w, content_h)
+          local can_click = content_click and do_draw and point_in_rect(gfx.mouse_x, gfx.mouse_y, content_x, content_y, content_w, content_h)
           if draw_button(content_x + 8, draw_y, content_w - 16, button_h, button_text, can_click) then
             callback(content_x + 16, draw_y + button_h + 2)
           end
@@ -6714,7 +7284,7 @@ function OzChordTrack.run_compact_popout_panel()
           local segment_w = math.floor(total_w / count)
           local last_extra = total_w - (segment_w * count)
           local draw_x = content_x + 8
-          local can_click_row = click and do_draw and point_in_rect(gfx.mouse_x, gfx.mouse_y, content_x, content_y, content_w, content_h)
+          local can_click_row = content_click and do_draw and point_in_rect(gfx.mouse_x, gfx.mouse_y, content_x, content_y, content_w, content_h)
 
           for i = 1, count do
             local option = options[i]
@@ -6791,7 +7361,7 @@ function OzChordTrack.run_compact_popout_panel()
           gfx.y = draw_y + math.max(2, (button_h - text_h) * 0.5)
           gfx.drawstr(display)
 
-          if hovered and can_click_row and click then
+          if hovered and can_click_row and content_click then
             callback()
           end
         end)
@@ -6888,7 +7458,7 @@ function OzChordTrack.run_compact_popout_panel()
           gfx.y = draw_y + math.max(2, (row_h - text_h) * 0.5)
           gfx.drawstr(display)
 
-          if hovered and can_click_row and click then
+          if hovered and can_click_row and content_click then
             callback()
           end
         end)
@@ -6977,6 +7547,22 @@ function OzChordTrack.run_compact_popout_panel()
           apply_selected_mode(selected_id)
         end)
 
+        if effective_snap_mode == SNAP_MODE_SCALE_ONLY then
+          spacer(spacer_h)
+          toggle_switch_row("Map tonic to C", ui_state.map_tonic_to_c and "on" or "off", function()
+            local next_value = not ui_state.map_tonic_to_c
+            local updated = update_map_tonic_to_c_for_selected_tracks(next_value)
+            if updated <= 0 then
+              set_status("No target tracks selected.")
+              return
+            end
+            -- Keep legacy project flag in sync for older input-snap FX variants.
+            set_map_tonic_to_c_enabled(next_value)
+            ui_state.map_tonic_to_c = next_value
+            set_status(SnapSettings.toggle_status("Map tonic to C", next_value) .. " Saved to " .. tostring(updated) .. " track(s).")
+          end)
+        end
+
         spacer(spacer_h)
         label("Runtime", heading_font, 0.95, 0.95, 0.98)
         if runtime_running then
@@ -6986,6 +7572,7 @@ function OzChordTrack.run_compact_popout_panel()
         end
         label(runtime_detail, meta_font, runtime_r, runtime_g, runtime_b)
         label("Current method: " .. snap_mode_to_label(effective_snap_mode), meta_font, 0.80, 0.80, 0.84)
+        label("Disarm FX cleanup: " .. (ui_state.remove_input_snap_fx_on_disarm and "On" or "Off"), meta_font, 0.80, 0.80, 0.84)
 
         spacer(spacer_h)
         label("Voicing", heading_font, 0.95, 0.95, 0.98)
@@ -7004,6 +7591,12 @@ function OzChordTrack.run_compact_popout_panel()
 
         spacer(spacer_h)
         label("Input Snap Utilities", heading_font, 0.95, 0.95, 0.98)
+        toggle_switch_row("Remove input snap FX on disarm", ui_state.remove_input_snap_fx_on_disarm and "on" or "off", function()
+          local next_value = not ui_state.remove_input_snap_fx_on_disarm
+          set_remove_input_snap_fx_on_disarm_enabled(next_value)
+          ui_state.remove_input_snap_fx_on_disarm = next_value
+          set_status(SnapSettings.toggle_status("Remove input snap FX on disarm", next_value))
+        end)
         button_row("Ensure input snap JSFX installed", run_ensure_input_snap_jsfx_action)
         button_row("Repair input snap FX instances", run_repair_input_snap_fx_action)
 
@@ -7014,22 +7607,7 @@ function OzChordTrack.run_compact_popout_panel()
         label("Chord Block Theme", heading_font, 0.95, 0.95, 0.98)
         label("Current: " .. chord_block_theme_to_display_label(ui_state.block_theme), body_font)
         label("Resolved: " .. chord_block_theme_to_label(resolved), meta_font, 0.80, 0.80, 0.84)
-
-        local themes = {
-          CHORD_BLOCK_THEME_AUTO,
-          CHORD_BLOCK_THEME_BLUE,
-          CHORD_BLOCK_THEME_PURPLE,
-          CHORD_BLOCK_THEME_NEUTRAL,
-        }
-        for i = 1, #themes do
-          local theme = themes[i]
-          local marker = (ui_state.block_theme == theme) and "(●) " or "(○) "
-          button_row(marker .. chord_block_theme_to_label(theme), function()
-            ui_state.block_theme = normalize_chord_block_theme(theme)
-            reaper.SetExtState(PANEL_SECTION, "BLOCK_THEME", ui_state.block_theme, true)
-            set_status(format_theme_set_status(ui_state.block_theme))
-          end)
-        end
+        menu_button_row("Theme menu ▼", apply_block_theme_menu)
 
         spacer(spacer_h)
         label("Highlight Color", heading_font, 0.95, 0.95, 0.98)
@@ -7053,11 +7631,100 @@ function OzChordTrack.run_compact_popout_panel()
         label("Timeline Align Offset: " .. timeline_calibration_to_label(ui_state.timeline_calibration_px), body_font)
         menu_button_row("Set timeline align offset (coarse/fine) ▼", apply_timeline_calibration_menu)
 
-        spacer(spacer_h)
-        menu_button_row("Theme menu ▼", apply_block_theme_menu)
       end
 
       return virtual_y + 8
+    end
+
+    local function scrollbar_geometry(content_total_value, max_scroll_value)
+      if max_scroll_value <= 0 then
+        return nil
+      end
+
+      local track_h = content_h - 12
+      if track_h <= 0 then
+        return nil
+      end
+
+      local tab_id = ui_state.active_tab
+      local scroll = ui_state.tab_scroll[tab_id] or 0
+      local track_x = content_x + content_w - 8
+      local track_y = content_y + 6
+      local track_w = 4
+      local thumb_h = math.max(24, (content_h / math.max(content_h, content_total_value)) * track_h)
+      if thumb_h > track_h then
+        thumb_h = track_h
+      end
+      local thumb_range = math.max(1, track_h - thumb_h)
+      local thumb_y = track_y + ((scroll / max_scroll_value) * thumb_range)
+
+      return {
+        tab_id = tab_id,
+        max_scroll = max_scroll_value,
+        track_x = track_x,
+        track_y = track_y,
+        track_w = track_w,
+        track_h = track_h,
+        thumb_y = thumb_y,
+        thumb_h = thumb_h,
+        hit_x = track_x - 3,
+        hit_w = track_w + 6,
+      }
+    end
+
+    local function apply_scrollbar_input(geom)
+      local tab_id = ui_state.active_tab
+
+      if ui_state.scrollbar_drag_tab == tab_id and (not lmb_down or not geom) then
+        ui_state.scrollbar_drag_tab = nil
+        ui_state.scrollbar_drag_offset = 0
+      end
+
+      if not geom then
+        return false, false
+      end
+
+      local mouse_on_track = point_in_rect(gfx.mouse_x, gfx.mouse_y, geom.hit_x, geom.track_y, geom.hit_w, geom.track_h)
+      local mouse_on_thumb = point_in_rect(gfx.mouse_x, gfx.mouse_y, geom.hit_x, geom.thumb_y, geom.hit_w, geom.thumb_h)
+      local consumed = false
+
+      if click and mouse_on_track then
+        ui_state.scrollbar_drag_tab = tab_id
+        if mouse_on_thumb then
+          ui_state.scrollbar_drag_offset = gfx.mouse_y - geom.thumb_y
+        else
+          ui_state.scrollbar_drag_offset = geom.thumb_h * 0.5
+        end
+        consumed = true
+      end
+
+      if ui_state.scrollbar_drag_tab == tab_id and lmb_down then
+        local thumb_range = math.max(1, geom.track_h - geom.thumb_h)
+        local drag_offset = ui_state.scrollbar_drag_offset or (geom.thumb_h * 0.5)
+        local thumb_top = gfx.mouse_y - drag_offset
+        local t = (thumb_top - geom.track_y) / thumb_range
+        if t < 0 then
+          t = 0
+        elseif t > 1 then
+          t = 1
+        end
+        ui_state.tab_scroll[tab_id] = geom.max_scroll * t
+        consumed = true
+      end
+
+      return consumed, mouse_on_track
+    end
+
+    local function draw_scrollbar(geom)
+      if not geom then
+        return
+      end
+
+      gfx.set(0.16, 0.16, 0.17, 1)
+      gfx.rect(geom.track_x, geom.track_y, geom.track_w, geom.track_h, 1)
+
+      gfx.set(0.52, 0.52, 0.57, 1)
+      gfx.rect(geom.track_x, geom.thumb_y, geom.track_w, geom.thumb_h, 1)
     end
 
     local content_total = render_tab(false)
@@ -7070,6 +7737,9 @@ function OzChordTrack.run_compact_popout_panel()
       ui_state.tab_scroll[ui_state.active_tab] = scroll
     end
 
+    local scrollbar_geom = scrollbar_geometry(content_total, max_scroll)
+    local scrollbar_consumed_click, scrollbar_hovered = apply_scrollbar_input(scrollbar_geom)
+
     if ui_state.tab_scroll[ui_state.active_tab] == nil then
       ui_state.tab_scroll[ui_state.active_tab] = 0
     end
@@ -7080,27 +7750,25 @@ function OzChordTrack.run_compact_popout_panel()
       ui_state.tab_scroll[ui_state.active_tab] = max_scroll
     end
 
+    scrollbar_geom = scrollbar_geometry(content_total, max_scroll)
+    content_click = click and not scrollbar_consumed_click and not scrollbar_hovered
     render_tab(true)
+    draw_scrollbar(scrollbar_geom)
 
-    if max_scroll > 0 then
-      local scroll = ui_state.tab_scroll[ui_state.active_tab] or 0
-      local track_x = content_x + content_w - 8
-      local track_y = content_y + 6
-      local track_h = content_h - 12
-      gfx.set(0.16, 0.16, 0.17, 1)
-      gfx.rect(track_x, track_y, 4, track_h, 1)
-
-      local thumb_h = math.max(24, (content_h / content_total) * track_h)
-      local thumb_y = track_y + ((scroll / max_scroll) * (track_h - thumb_h))
-      gfx.set(0.52, 0.52, 0.57, 1)
-      gfx.rect(track_x, thumb_y, 4, thumb_h, 1)
-    end
+    gfx.set(0.09, 0.09, 0.10, 0.90)
+    gfx.rect(x + 1, status_y, w - 2, status_h, 1)
+    gfx.set(0.20, 0.20, 0.22, 1)
+    gfx.line(x + 1, status_y, x + w - 1, status_y)
 
     if ui_state.status_text ~= "" and now <= ui_state.status_expires then
+      local status_font = math.max(10, meta_font)
+      local status_text = fit_text_to_width(ui_state.status_text, math.max(20, w - 16), status_font)
+      gfx.setfont(1, "Segoe UI", status_font)
       gfx.set(0.90, 0.92, 0.78, 1)
+      local _, status_text_h = gfx.measurestr(status_text)
       gfx.x = x + 8
-      gfx.y = y + h - 18
-      gfx.drawstr(ui_state.status_text)
+      gfx.y = status_y + math.max(1, (status_h - status_text_h) * 0.5)
+      gfx.drawstr(status_text)
     end
 
     persist_popout_window_geometry(false)
